@@ -11,6 +11,7 @@ import SectionInfo from './components/SectionInfo';
 import SectionJazdy from './components/SectionJazdy';
 import Modal from './components/Modal';
 import Toast, { type ToastMessage } from './components/Toast';
+import LoginScreen from './components/LoginScreen';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() {
@@ -19,6 +20,7 @@ function uid() {
 
 // ─── App ───────────────────────────────────────────────────────────────────
 const App: React.FC = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeSection, setActiveSection] = useState<NavSection>('start');
   const [drives, setDrives] = useState<Drive[]>(MOCK_DRIVES);
   const [terminy, setTerminy] = useState<Termin[]>(MOCK_TERMINY);
@@ -47,6 +49,10 @@ const App: React.FC = () => {
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
+  }
 
   // ── Handlers ────────────────────────────────────────────────────────────
   const handleConfirmReserve = () => {
@@ -141,6 +147,7 @@ const App: React.FC = () => {
         student={MOCK_STUDENT}
         courseProgress={MOCK_STUDENT.courseProgress}
         onNavigateDane={() => addToast('Sekcja danych osobowych – wkrótce dostępna', 'info')}
+        onLogout={() => setIsLoggedIn(false)}
       />
 
       {/* Layout */}

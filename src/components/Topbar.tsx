@@ -15,6 +15,7 @@ interface Props {
   student: { firstName: string; lastName: string; category: string };
   courseProgress: number;
   onNavigateDane: () => void;
+  onLogout: () => void;
 }
 
 const DROPDOWN_ITEMS = [
@@ -64,7 +65,7 @@ const DROPDOWN_ITEMS = [
   },
 ];
 
-const Topbar: React.FC<Props> = ({ student, courseProgress, onNavigateDane }) => {
+const Topbar: React.FC<Props> = ({ student, courseProgress, onNavigateDane, onLogout }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -167,7 +168,10 @@ const Topbar: React.FC<Props> = ({ student, courseProgress, onNavigateDane }) =>
               <button
                 className="dropdown-item dropdown-item-danger"
                 role="menuitem"
-                onClick={() => setDropdownOpen(false)}
+                onClick={() => {
+                  setDropdownOpen(false);
+                  onLogout();
+                }}
               >
                 <span className="dropdown-item-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"
