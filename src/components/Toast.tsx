@@ -3,7 +3,7 @@ import React, { useEffect } from 'react';
 export interface ToastMessage {
   id: string;
   text: string;
-  type: 'success' | 'info';
+  type: 'success' | 'info' | 'error';
 }
 
 interface Props {
@@ -28,8 +28,8 @@ const ToastItem: React.FC<{ toast: ToastMessage; onRemove: (id: string) => void 
   }, [toast.id, onRemove]);
 
   return (
-    <div className={`toast${toast.type === 'success' ? ' success' : ''}`} onClick={() => onRemove(toast.id)}>
-      {toast.type === 'success' ? '✓' : 'ℹ'} {toast.text}
+    <div className={`toast${toast.type === 'success' ? ' success' : toast.type === 'error' ? ' error' : ''}`} onClick={() => onRemove(toast.id)}>
+      {toast.type === 'success' ? '✓' : toast.type === 'error' ? '⚠' : 'ℹ'} {toast.text}
     </div>
   );
 };
