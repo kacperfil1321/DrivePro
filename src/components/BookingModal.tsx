@@ -204,6 +204,10 @@ export const BookingModal: React.FC<Props> = ({
 
   /* Submit */
   const selectedInstructor = instructors.find((i) => i.id === selectedInstructorId);
+  const selectedSlot = useMemo(
+    () => visibleSlots.find((s) => s.time === selectedTime),
+    [visibleSlots, selectedTime]
+  );
 
   const handleSubmit = async () => {
     if (!selectedDate || !selectedTime || !selectedInstructorId) {
@@ -251,7 +255,11 @@ export const BookingModal: React.FC<Props> = ({
             onClick={handleSubmit}
             disabled={isSubmitting || !selectedTime}
           >
-            {isSubmitting ? 'Rezerwowanie...' : 'Potwierdź rezerwację'}
+            {isSubmitting
+              ? 'Rezerwowanie...'
+              : selectedTime
+              ? `Zarezerwuj (${selectedTime})`
+              : 'Potwierdź rezerwację'}
           </button>
         </>
       }
@@ -474,7 +482,7 @@ export const BookingModal: React.FC<Props> = ({
                         title={
                           isBooked
                             ? 'Termin zajęty przez innego kursanta'
-                            : `Wybierz ${slot.time}`
+                            : `Wybierz godzinę rozpoczęcia: ${slot.time}`
                         }
                       >
                         <span className="bslot-time">{slot.time}</span>
@@ -488,9 +496,14 @@ export const BookingModal: React.FC<Props> = ({
               )}
 
               {/* Legend */}
-              <p className="booking-legend-hint" style={{ marginTop: 'auto', paddingTop: 8 }}>
-                <span className="legend-indicator dot-free" /> Wolny
-                <span className="legend-indicator dot-booked" /> Zajęty
+              <p className="booking-legend-hint" style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>
+                  <span className="legend-indicator dot-free" /> Wolny
+                  <span className="legend-indicator dot-booked" style={{ marginLeft: 8 }} /> Zajęty
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--gray-500)', fontWeight: 500 }}>
+                  ⏱️ Każda lekcja trwa 2 godz.
+                </span>
               </p>
             </div>
           </div>

@@ -18,6 +18,8 @@ import {
   fetchInstructors,
   fetchBookedRides,
   bookRideInDatabase,
+  parseRideTimestamp,
+  formatRideTimeRange,
   type Instructor,
   type RideReservation,
 } from './lib/bookingService';
@@ -31,93 +33,69 @@ function uid() {
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [activeSection, setActiveSection] = useState<NavSection>('start');
-  const [drives, setDrives] = useState<Drive[]>(MOCK_DRIVES);
-  const [terminy, setTerminy] = useState<Termin[]>(MOCK_TERMINY);
+  const [drives, setDrives] = useState<Drive[]>([]);
+  const [terminy, setTerminy] = useState<Termin[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // ── Database Data ────────────────────────────────────────────────────────
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [bookedRides, setBookedRides] = useState<RideReservation[]>([]);
 
-  // Pobieranie danych z Supabase przy starcie
+  // Pobieranie danych z Supabase przy zmianie użytkownika / starcie
   useEffect(() => {
     async function loadData() {
-      const [insData, ridesData] = await Promise.all([
+      const [insData, allRidesData] = await Promise.all([
         fetchInstructors(),
-        fetchBookedRides(),
+        fetchBookedRides(), // wszystkie rezerwacje (do weryfikacji zajętych slotów w kalendarzu rezerwacji)
       ]);
 
       setInstructors(insData);
-      setBookedRides(ridesData);
+      setBookedRides(allRidesData);
 
-      // Jeśli w bazie są już jazdy, aktualizujemy stan drives i terminy
-      if (ridesData.length > 0) {
-        const loadedDrives: Drive[] = ridesData.map((r: RideReservation) => {
-          const rDate = new Date(r.data);
-          const dateYMD = rDate.toISOString().slice(0, 10);
-          const timeH = String(rDate.getHours()).padStart(2, '0');
-          const timeM = String(rDate.getMinutes()).padStart(2, '0');
-          const endH = String(rDate.getHours() + 1).padStart(2, '0');
+      // Dla zalogowanego kursanta pokazujemy tylko JEGO jazdy
+      const studentId = currentUser?.role === 'student' ? currentUser.id : undefined;
+      const userRides = studentId
+        ? allRidesData.filter((r) => r.id_kursanta === studentId)
+        : [];
+
+      const loadedDrives: Drive[] = userRides.map((r: RideReservation) => {
+        const parsed = parseRideTimestamp(r.data);
+        const ins = insData.find((i: Instructor) => i.id === r.id_instruktora);
+        const insName = ins ? `${ins.imie} ${ins.nazwisko}` : 'Instruktor';
+        const rDate = new Date(r.data);
+
+        return {
+          id: r.id,
+          date: parsed.dateStr,
+          timeRange: formatRideTimeRange(parsed.timeStr),
+          instructor: insName,
+          duration: 120, // każda lekcja trwa 2h
+          status: rDate < new Date() ? 'completed' : 'upcoming',
+        };
+      });
+
+      const loadedTerminy: Termin[] = userRides
+        .filter((r: RideReservation) => new Date(r.data) >= new Date())
+        .map((r: RideReservation) => {
+          const parsed = parseRideTimestamp(r.data);
           const ins = insData.find((i: Instructor) => i.id === r.id_instruktora);
           const insName = ins ? `${ins.imie} ${ins.nazwisko}` : 'Instruktor';
 
           return {
-            id: r.id,
-            date: dateYMD,
-            timeRange: `${timeH}:${timeM}–${endH}:${timeM}`,
-            instructor: insName,
-            duration: 60,
-            status: rDate < new Date() ? 'completed' : 'upcoming',
+            id: `db-${r.id}`,
+            title: `${r.typ_jazdy || 'Jazda'} (${insName})`,
+            date: parsed.dateStr,
+            time: formatRideTimeRange(parsed.timeStr),
+            type: 'ride',
           };
         });
 
-        const loadedTerminy: Termin[] = ridesData
-          .filter((r: RideReservation) => new Date(r.data) >= new Date())
-          .map((r: RideReservation) => {
-            const rDate = new Date(r.data);
-            const dateYMD = rDate.toISOString().slice(0, 10);
-            const timeH = String(rDate.getHours()).padStart(2, '0');
-            const timeM = String(rDate.getMinutes()).padStart(2, '0');
-            const ins = insData.find((i: Instructor) => i.id === r.id_instruktora);
-            const insName = ins ? `${ins.imie} ${ins.nazwisko}` : 'Instruktor';
-
-            return {
-              id: `db-${r.id}`,
-              title: `${r.typ_jazdy || 'Jazda'} (${insName})`,
-              date: dateYMD,
-              time: `${timeH}:${timeM}`,
-              type: 'ride',
-            };
-          });
-
-        if (loadedDrives.length > 0) {
-          setDrives((prev) => {
-            const merged = [...loadedDrives];
-            prev.forEach((p) => {
-              if (!merged.some((m) => m.date === p.date && m.timeRange === p.timeRange)) {
-                merged.push(p);
-              }
-            });
-            return merged;
-          });
-        }
-
-        if (loadedTerminy.length > 0) {
-          setTerminy((prev) => {
-            const merged = [...loadedTerminy];
-            prev.forEach((p) => {
-              if (!merged.some((m) => m.date === p.date && m.time === p.time)) {
-                merged.push(p);
-              }
-            });
-            return merged;
-          });
-        }
-      }
+      setDrives(loadedDrives);
+      setTerminy(loadedTerminy);
     }
 
     loadData();
-  }, []);
+  }, [currentUser]);
 
   // ── Modals ──────────────────────────────────────────────────────────────
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -164,8 +142,13 @@ const App: React.FC = () => {
     );
   }
 
-  // Zalogowano jako Kursant -> student profile
-  const studentData: Student = currentUser.student
+  // Zalogowano jako Kursant -> student profile obliczany dynamicznie z faktycznych jazd
+  const completedDrives = drives.filter((d) => d.status === 'completed');
+  const dynamicHoursCompleted = completedDrives.reduce((acc, d) => acc + (d.duration || 120) / 60, 0);
+  const totalCourseHours = MOCK_STUDENT.hoursTotal || 30;
+  const dynamicProgress = totalCourseHours > 0 ? Math.round((dynamicHoursCompleted / totalCourseHours) * 100) : 0;
+
+  const baseStudent = currentUser.student
     ? {
         ...MOCK_STUDENT,
         firstName: currentUser.student.imie,
@@ -180,6 +163,13 @@ const App: React.FC = () => {
         lastName: currentUser.name.split(' ').slice(1).join(' ') || MOCK_STUDENT.lastName,
         email: currentUser.email || MOCK_STUDENT.email,
       };
+
+  const studentData: Student = {
+    ...baseStudent,
+    hoursCompleted: dynamicHoursCompleted,
+    hoursTotal: totalCourseHours,
+    courseProgress: dynamicProgress,
+  };
 
   // ── Rezerwacja z bazą Supabase ──────────────────────────────────────────
   const handleBookingConfirm = async (booking: {
@@ -207,24 +197,23 @@ const App: React.FC = () => {
       return false;
     }
 
-    // Dodanie do lokalnego stanu jazdy
-    const startHour = parseInt(booking.time.split(':')[0], 10);
-    const timeRange = `${booking.time}–${String(startHour + 1).padStart(2, '0')}:${booking.time.split(':')[1]}`;
+    // Dodanie do lokalnego stanu jazdy (lekcja 2h)
+    const timeRange = formatRideTimeRange(booking.time);
 
     const newDrive: Drive = {
       id: result.ride?.id || Date.now(),
       date: booking.date,
       timeRange,
       instructor: booking.instructorName,
-      duration: 60,
+      duration: 120, // 2 godziny
       status: 'upcoming',
     };
 
     const newTermin: Termin = {
       id: `ride-${Date.now()}`,
-      title: `${booking.rideType} (${booking.instructorName})`,
+      title: `${booking.rideType || 'Jazda szkoleniowa'} (${booking.instructorName})`,
       date: booking.date,
-      time: booking.time,
+      time: timeRange,
       type: 'ride',
     };
 

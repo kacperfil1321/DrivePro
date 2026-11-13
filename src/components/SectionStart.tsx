@@ -55,8 +55,8 @@ function getCurrentWeekDays(today: Date, terminy: Termin[]): WeekDay[] {
       dayNumber: d.getDate(),
       dateStr,
       isToday,
-      hasRide: Boolean(rideTermin) || d.getDate() === 30, // 30th has ride
-      rideInfo: rideTermin ? rideTermin.time : (d.getDate() === 30 ? '10:00' : undefined),
+      hasRide: Boolean(rideTermin),
+      rideInfo: rideTermin ? rideTermin.time : undefined,
     });
   }
 
@@ -72,16 +72,15 @@ const SectionStart: React.FC<Props> = ({ student, school, terminy, drives, onRes
   const today = new Date();
   const weekDays = getCurrentWeekDays(today, terminy);
 
-  // Show upcoming terminy, or fall back to mock upcoming drives if terminy empty
-  const upcomingList = (terminy && terminy.length > 0)
-    ? terminy.slice(0, 4)
-    : [
-        { id: 'm1', title: 'Jazda z instruktorem (Marek Nowak)', date: '2026-10-30', time: '10:00–12:00', type: 'ride' as const },
-        { id: 'm2', title: 'Jazda doszkalająca (Anna Wiśniewska)', date: '2026-11-03', time: '14:00–16:00', type: 'ride' as const },
-      ];
+  // Prawdziwe nadchodzące terminy kursanta
+  const upcomingList = (terminy && terminy.length > 0) ? terminy.slice(0, 4) : [];
 
-  void drives;
-  const hoursLeft = student.hoursTotal - student.hoursCompleted;
+  // Oblicz godziny z rzeczywistych jazd (completed)
+  const completedDrives = drives.filter(d => d.status === 'completed');
+  const hoursCompleted = completedDrives.reduce((sum, d) => sum + (d.duration || 120) / 60, 0);
+  const hoursTotal = student.hoursTotal;
+  const hoursLeft = hoursTotal - hoursCompleted;
+  const progressPercent = hoursTotal > 0 ? Math.round((hoursCompleted / hoursTotal) * 100) : 0;
 
   return (
     <section id="section-start" className="section-fill">
@@ -90,7 +89,7 @@ const SectionStart: React.FC<Props> = ({ student, school, terminy, drives, onRes
         <div>
           <h1>Cześć, {student.firstName}! 👋</h1>
           <p className="start-subtitle">
-            Masz ukończone <strong>{student.hoursCompleted} z {student.hoursTotal} godz.</strong> —
+            Masz ukończone <strong>{hoursCompleted} z {hoursTotal} godz.</strong> —
             zostało Ci jeszcze <strong>{hoursLeft} godz.</strong> do egzaminu.
           </p>
         </div>
@@ -302,7 +301,7 @@ const SectionStart: React.FC<Props> = ({ student, school, terminy, drives, onRes
               </svg>
             </span>
             <span className="start-clean-title">Egzamin</span>
-            <span className="egzamin-badge-clean">{Math.round((student.hoursCompleted / student.hoursTotal) * 100)}%</span>
+            <span className="egzamin-badge-clean">{progressPercent}%</span>
           </div>
 
           <div className="start-clean-body">
@@ -310,12 +309,12 @@ const SectionStart: React.FC<Props> = ({ student, school, terminy, drives, onRes
               <div className="egzamin-info-card">
                 <span className="egzamin-info-title">Status przygotowania do egzaminu</span>
                 <span className="egzamin-info-desc">
-                  Ukończono {student.hoursCompleted} z {student.hoursTotal} godz. jazdy (zostało {hoursLeft}h)
+                  Ukończono {hoursCompleted} z {hoursTotal} godz. jazdy (zostało {hoursLeft}h)
                 </span>
                 <div className="mini-bar-track" style={{ marginTop: 6 }}>
                   <div
                     className="mini-bar-fill"
-                    style={{ width: `${Math.round((student.hoursCompleted / student.hoursTotal) * 100)}%` }}
+                    style={{ width: `${progressPercent}%` }}
                   />
                 </div>
               </div>

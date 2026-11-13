@@ -1253,13 +1253,18 @@ input, select { font-family: inherit; }
   position: relative;
   transition: var(--transition);
 }
-.cal-day:not(.cal-empty):hover { background: var(--blue-50); }
+.cal-day:not(.cal-empty):not(.cal-today):hover { background: var(--blue-50); }
 .cal-day.cal-empty { color: transparent; cursor: default; }
 .cal-day.cal-today {
   background: linear-gradient(135deg, var(--blue-500), var(--cyan-500));
   color: #fff;
   font-weight: 700;
   box-shadow: 0 3px 10px rgba(59,130,246,.35);
+}
+.cal-day.cal-today:hover {
+  background: linear-gradient(135deg, var(--blue-600), #0891b2);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(59,130,246,.45);
 }
 .cal-day.cal-has-ride::after {
   content: '';
@@ -1271,6 +1276,7 @@ input, select { font-family: inherit; }
   background: var(--blue-400);
 }
 .cal-day.cal-today.cal-has-ride::after { background: rgba(255,255,255,.8); }
+.cal-day.cal-today.cal-has-upcoming::after { background: rgba(255,255,255,.8); }
 .cal-day.cal-has-exam::after {
   content: '';
   position: absolute;
@@ -2661,7 +2667,7 @@ input, select { font-family: inherit; }
   flex-shrink: 0;
 }
 .dot-completed-sm { background: var(--blue-400); }
-.dot-upcoming-sm  { background: #22d3ee; }
+.dot-upcoming-sm  { background: var(--orange-500); }
 
 .jazdy-drive-info {
   display: flex;
@@ -2694,7 +2700,7 @@ input, select { font-family: inherit; }
 }
 
 /* Upcoming dot colour in calendar legend */
-.dot-upcoming { background: #22d3ee; }
+.dot-upcoming { background: var(--orange-500); }
 
 /* cal-has-upcoming dot marker */
 .cal-day.cal-has-upcoming::after {
@@ -2704,7 +2710,7 @@ input, select { font-family: inherit; }
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #22d3ee;
+  background: var(--orange-500);
 }
 
 
@@ -3460,17 +3466,36 @@ input, select { font-family: inherit; }
   min-height: 54px;
   position: relative;
 }
-.booking-cal-day:hover:not(.cal-day-disabled):not(.cal-day-other-month) {
+.booking-cal-day:hover:not(.cal-day-disabled):not(.cal-day-other-month):not(.cal-day-selected) {
   background: var(--blue-50);
 }
 .booking-cal-day.cal-day-selected {
   background: var(--blue-600);
   border-radius: 10px;
   color: #fff;
+  box-shadow: 0 2px 8px rgba(37,99,235,.35);
+}
+.booking-cal-day.cal-day-selected:hover {
+  background: var(--blue-700);
 }
 .booking-cal-day.cal-day-today .cal-day-num {
   font-weight: 800;
   color: var(--blue-600);
+  background: var(--blue-100);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.booking-cal-day.cal-day-today:hover .cal-day-num {
+  background: var(--blue-200);
+  color: var(--blue-700);
+}
+.booking-cal-day.cal-day-selected.cal-day-today .cal-day-num {
+  background: rgba(255,255,255,.25);
+  color: #fff;
 }
 .booking-cal-day.cal-day-selected .cal-day-num {
   color: #fff;
@@ -3521,8 +3546,8 @@ input, select { font-family: inherit; }
    ============================================= */
 .booking-slots-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
 }
 .bslot {
   display: flex;

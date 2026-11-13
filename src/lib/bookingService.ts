@@ -55,9 +55,59 @@ export interface RideReservation {
 }
 
 export interface AvailableSlot {
-  time: string; // "08:00"
+  time: string; // np. "10:00" - godzina rozpoczęcia jazdy
+  endTime?: string; // np. "12:00"
   isAvailable: boolean;
   reason?: 'booked' | 'outside_working_hours' | 'day_off' | 'past' | 'too_far';
+}
+
+export const LESSON_DURATION_HOURS = 2; // Każda lekcja jazdy trwa 2 godziny
+
+export function addHours(timeStr: string, hours: number): string {
+  const [h, m] = (timeStr || '10:00').split(':').map(Number);
+  const endH = (h || 0) + hours;
+  return `${String(endH).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
+}
+
+/** Formatuje przedział 2-godzinnej lekcji, np. "10:00" -> "10:00–12:00" */
+export function formatRideTimeRange(startTime: string): string {
+  const [hStr, mStr] = (startTime || '10:00').split(':');
+  const startH = parseInt(hStr, 10) || 10;
+  const endH = String(startH + LESSON_DURATION_HOURS).padStart(2, '0');
+  const min = (mStr || '00').slice(0, 2);
+  return `${String(startH).padStart(2, '0')}:${min}–${endH}:${min}`;
+}
+
+/** Bezpiecznie parsuje timestamp jazdy z bazy Supabase */
+export function parseRideTimestamp(dataStr?: string | null): { dateStr: string; timeStr: string } {
+  if (!dataStr) {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return { dateStr: `${y}-${m}-${d}`, timeStr: '10:00' };
+  }
+
+  const str = String(dataStr).trim().replace(' ', 'T');
+  if (str.includes('T')) {
+    const parts = str.split('T');
+    const dateStr = parts[0];
+    const timePart = parts[1] || '10:00';
+    const timeStr = timePart.slice(0, 5);
+    return { dateStr, timeStr };
+  }
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return { dateStr: `${y}-${m}-${day}`, timeStr: `${h}:${min}` };
+  }
+
+  return { dateStr: '', timeStr: '10:00' };
 }
 
 export const HOURLY_SLOTS = [
@@ -67,20 +117,19 @@ export const HOURLY_SLOTS = [
 
 /**
  * Zlicza dostępne sloty dla konkretnego dnia — używane przez mini-kalendarz do rysowania kropek.
- * Zwraca { total, free } uwzględniając grafik i rezerwacje.
+ * Zwraca { total, free } uwzględniając grafik i rezerwacje 2-godzinnych lekcji.
  */
 export function countSlotsForDay(
   dateStr: string,
   instructorId: number,
-  bookedRides: RideReservation[],
-  weeklySchedule: WeeklyScheduleDay[],
-  exceptions: AvailabilityException[]
+  bookedRides: RideReservation[] = [],
+  weeklySchedule: WeeklyScheduleDay[] = [],
+  exceptions: AvailabilityException[] = []
 ): { total: number; free: number } {
   const slots = calculateAvailableSlots(dateStr, instructorId, bookedRides, weeklySchedule, exceptions);
-  const workSlots = slots.filter((s) => s.reason !== 'outside_working_hours' && s.reason !== 'too_far');
   return {
-    total: workSlots.length,
-    free: workSlots.filter((s) => s.isAvailable).length,
+    total: slots.length,
+    free: slots.filter((s) => s.isAvailable).length,
   };
 }
 
@@ -122,15 +171,16 @@ export async function fetchInstructors(): Promise<Instructor[]> {
  * Pobiera stały tygodniowy grafik instruktora
  */
 export async function fetchWeeklySchedule(instructorId: number): Promise<WeeklyScheduleDay[]> {
+  const defaultSchedule: WeeklyScheduleDay[] = [1, 2, 3, 4, 5, 6].map((day) => ({
+    id_instruktora: instructorId,
+    dzien_tygodnia: day,
+    godzina_od: '10:00:00',
+    godzina_do: '18:00:00',
+    aktywny: true,
+  }));
+
   if (!supabase) {
-    // Domyślny grafik: Wt-Sb 10:00-18:00
-    return [2, 3, 4, 5, 6].map((day) => ({
-      id_instruktora: instructorId,
-      dzien_tygodnia: day,
-      godzina_od: '10:00:00',
-      godzina_do: '18:00:00',
-      aktywny: true,
-    }));
+    return defaultSchedule;
   }
 
   try {
@@ -140,10 +190,12 @@ export async function fetchWeeklySchedule(instructorId: number): Promise<WeeklyS
       .eq('id_instruktora', instructorId)
       .eq('aktywny', true);
 
-    if (error || !data) return [];
+    if (error || !data || data.length === 0) {
+      return defaultSchedule;
+    }
     return data;
   } catch {
-    return [];
+    return defaultSchedule;
   }
 }
 
@@ -306,14 +358,14 @@ export async function fetchBookedRides(instructorId?: number): Promise<RideReser
 export function calculateAvailableSlots(
   dateStr: string, // YYYY-MM-DD
   instructorId: number,
-  bookedRides: RideReservation[],
-  weeklySchedule: WeeklyScheduleDay[],
-  exceptions: AvailabilityException[]
+  bookedRides: RideReservation[] = [],
+  weeklySchedule: WeeklyScheduleDay[] = [],
+  exceptions: AvailabilityException[] = []
 ): AvailableSlot[] {
   if (!dateStr || !instructorId) return [];
 
   const now = new Date();
-  const selectedDate = new Date(`${dateStr}T00:00:00`);
+  const selectedDate = new Date(`${dateStr}T12:00:00`);
 
   // Max 2 tygodnie w przód (14 dni)
   const maxBookingDate = new Date();
@@ -321,28 +373,20 @@ export function calculateAvailableSlots(
   maxBookingDate.setHours(23, 59, 59, 999);
 
   if (selectedDate > maxBookingDate) {
-    return HOURLY_SLOTS.map((slot) => ({
-      time: slot,
-      isAvailable: false,
-      reason: 'too_far',
-    }));
+    return [];
   }
 
   // Dzień tygodnia 1=Pn .. 7=Nd
   const dayOfWeek = selectedDate.getDay() === 0 ? 7 : selectedDate.getDay();
 
   // Sprawdzamy czy na ten dzień instruktor ma wyjątek
-  const dayException = exceptions.find(
-    (e) => e.id_instruktora === instructorId && e.data === dateStr
+  const dayException = (exceptions || []).find(
+    (e) => e && e.id_instruktora === instructorId && e.data === dateStr
   );
 
   // Jeśli ma wyjątek 'wolne' -> cały dzień niedostępny
   if (dayException && dayException.typ === 'wolne') {
-    return HOURLY_SLOTS.map((slot) => ({
-      time: slot,
-      isAvailable: false,
-      reason: 'day_off',
-    }));
+    return [];
   }
 
   // Godziny pracy w tym dniu
@@ -350,54 +394,92 @@ export function calculateAvailableSlots(
   let endHour = '';
 
   if (dayException && dayException.typ === 'praca' && dayException.godzina_od && dayException.godzina_do) {
-    // Niestandardowy dzień / godziny z wyjątku
     startHour = dayException.godzina_od.slice(0, 5);
     endHour = dayException.godzina_do.slice(0, 5);
   } else {
-    // Stały tygodniowy grafik
-    const regularDay = weeklySchedule.find(
-      (s) => s.id_instruktora === instructorId && s.dzien_tygodnia === dayOfWeek && s.aktywny
+    const regularDay = (weeklySchedule || []).find(
+      (s) => s && s.id_instruktora === instructorId && s.dzien_tygodnia === dayOfWeek && s.aktywny
     );
-    if (regularDay) {
+    if (regularDay && regularDay.godzina_od && regularDay.godzina_do) {
       startHour = regularDay.godzina_od.slice(0, 5);
       endHour = regularDay.godzina_do.slice(0, 5);
+    } else if (!weeklySchedule || weeklySchedule.length === 0) {
+      // Domyślny grafik jeśli grafik nie został jeszcze załadowany (Wt-Sb 10:00-18:00)
+      if (dayOfWeek >= 2 && dayOfWeek <= 6) {
+        startHour = '10:00';
+        endHour = '18:00';
+      }
     }
   }
 
-  return HOURLY_SLOTS.map((slot) => {
-    const slotDateTime = new Date(`${dateStr}T${slot}:00`);
+  if (!startHour || !endHour) {
+    return [];
+  }
+
+  const startH = parseInt(startHour.split(':')[0], 10) || 10;
+  const endH = parseInt(endHour.split(':')[0], 10) || 18;
+
+  // Pobieramy rezerwacje tego instruktora w danym dniu
+  const safeBookedRides = Array.isArray(bookedRides) ? bookedRides : [];
+  const dayRides = safeBookedRides.filter((ride) => {
+    if (!ride || ride.id_instruktora !== instructorId) return false;
+    const parsed = parseRideTimestamp(ride.data);
+    return parsed.dateStr === dateStr;
+  });
+
+  const slots: AvailableSlot[] = [];
+
+  for (let h = startH; h + LESSON_DURATION_HOURS <= endH; h += LESSON_DURATION_HOURS) {
+    const slotStartTime = `${String(h).padStart(2, '0')}:00`;
+    const slotEndTime = `${String(h + LESSON_DURATION_HOURS).padStart(2, '0')}:00`;
+    const slotDateTime = new Date(`${dateStr}T${slotStartTime}:00`);
 
     // 1. Czy slot minął
     if (slotDateTime <= now) {
-      return { time: slot, isAvailable: false, reason: 'past' };
+      slots.push({
+        time: slotStartTime,
+        endTime: slotEndTime,
+        isAvailable: false,
+        reason: 'past',
+      });
+      continue;
     }
 
-    // 2. Czy instruktor w ogóle pracuje o tej godzinie
-    if (!startHour || !endHour || slot < startHour || slot >= endHour) {
-      return { time: slot, isAvailable: false, reason: 'outside_working_hours' };
-    }
+    // 2. Czy termin koliduje z inną rezerwacją (każda rezerwacja trwa 2h)
+    const slotStartMin = h * 60;
+    const slotEndMin = (h + LESSON_DURATION_HOURS) * 60;
 
-    // 3. Czy termin jest już zajęty przez innego kursanta
-    const isBooked = bookedRides.some((ride) => {
-      if (ride.id_instruktora !== instructorId) return false;
-      const rideDate = new Date(ride.data);
-      const rideYMD = rideDate.toISOString().slice(0, 10);
-      const rideTime = ride.data.includes('T')
-        ? ride.data.split('T')[1].slice(0, 5)
-        : `${String(rideDate.getHours()).padStart(2, '0')}:${String(rideDate.getMinutes()).padStart(2, '0')}`;
-      return rideYMD === dateStr && rideTime === slot;
+    const isBooked = dayRides.some((ride) => {
+      const parsed = parseRideTimestamp(ride.data);
+      const [rH, rM] = parsed.timeStr.split(':').map(Number);
+      const rideStartMin = (rH || 0) * 60 + (rM || 0);
+      const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
+
+      return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
     });
 
     if (isBooked) {
-      return { time: slot, isAvailable: false, reason: 'booked' };
+      slots.push({
+        time: slotStartTime,
+        endTime: slotEndTime,
+        isAvailable: false,
+        reason: 'booked',
+      });
+      continue;
     }
 
-    return { time: slot, isAvailable: true };
-  });
+    slots.push({
+      time: slotStartTime,
+      endTime: slotEndTime,
+      isAvailable: true,
+    });
+  }
+
+  return slots;
 }
 
 /**
- * Rezerwuje termin jazdy w bazie Supabase
+ * Rezerwuje termin jazdy w bazie Supabase (zawsze 2 godziny lekcji)
  */
 export async function bookRideInDatabase(params: {
   instructorId: number;
@@ -408,6 +490,10 @@ export async function bookRideInDatabase(params: {
   studentId?: number | null;
 }): Promise<{ success: boolean; error?: string; ride?: RideReservation }> {
   const timestamp = `${params.dateStr}T${params.timeStr}:00`;
+  const startHour = parseInt(params.timeStr.split(':')[0], 10) || 10;
+  const startMin = parseInt(params.timeStr.split(':')[1] || '0', 10) || 0;
+  const slotStartMin = startHour * 60 + startMin;
+  const slotEndMin = slotStartMin + LESSON_DURATION_HOURS * 60;
 
   if (!supabase) {
     return {
@@ -424,19 +510,30 @@ export async function bookRideInDatabase(params: {
   }
 
   try {
-    // 1. Sprawdzenie czy inny kursant nie zajął terminu
-    const { data: existing } = await supabase
+    // 1. Sprawdzenie czy inny kursant nie zajął terminu kolidującego z tą 2-godzinną lekcją
+    const { data: existingRides } = await supabase
       .from('jazdy')
-      .select('id')
-      .eq('id_instruktora', params.instructorId)
-      .eq('data', timestamp)
-      .maybeSingle();
+      .select('id, data')
+      .eq('id_instruktora', params.instructorId);
 
-    if (existing) {
-      return {
-        success: false,
-        error: 'Ten termin został właśnie zarezerwowany przez innego kursanta. Wybierz inną godzinę.',
-      };
+    if (existingRides && existingRides.length > 0) {
+      const hasConflict = existingRides.some((r) => {
+        if (!r.data) return false;
+        const parsed = parseRideTimestamp(r.data);
+        if (parsed.dateStr !== params.dateStr) return false;
+        const [rH, rM] = parsed.timeStr.split(':').map(Number);
+        const rideStartMin = (rH || 0) * 60 + (rM || 0);
+        const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
+
+        return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
+      });
+
+      if (hasConflict) {
+        return {
+          success: false,
+          error: 'Ten termin (lub część 2-godzinnej lekcji) został już zarezerwowany przez innego kursanta. Wybierz inną godzinę.',
+        };
+      }
     }
 
     // 2. Wstawienie nowej jazdy

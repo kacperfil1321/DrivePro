@@ -10,6 +10,8 @@ import {
   addAvailabilityException,
   deleteAvailabilityException,
   fetchBookedRides,
+  formatRideTimeRange,
+  parseRideTimestamp,
 } from '../lib/bookingService';
 
 interface Props {
@@ -668,11 +670,8 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
                         month: 'short',
                         day: 'numeric',
                       });
-                      const timeStr = ride.data.includes('T')
-                        ? ride.data.split('T')[1].slice(0, 5)
-                        : `${String(rDate.getHours()).padStart(2, '0')}:${String(rDate.getMinutes()).padStart(2, '0')}`;
-                      const endH = String(parseInt(timeStr.split(':')[0], 10) + 1).padStart(2, '0');
-                      const timeRange = `${timeStr} – ${endH}:${timeStr.split(':')[1]}`;
+                      const parsed = parseRideTimestamp(ride.data);
+                      const timeRange = formatRideTimeRange(parsed.timeStr);
 
                       const studentName = ride.kursant
                         ? `${ride.kursant.imie} ${ride.kursant.nazwisko}`

@@ -65,7 +65,7 @@ const SectionJazdy: React.FC<Props> = ({ drives, student, onReserve }) => {
   const upcomingDrives  = drives.filter(d => d.status === 'upcoming')
                                .sort((a, b) => a.date.localeCompare(b.date));
 
-  const completedHours = completedDrives.reduce((acc, d) => acc + (d.duration || 60) / 60, 0);
+  const completedHours = completedDrives.reduce((acc, d) => acc + (d.duration || 120) / 60, 0);
   const totalHours = student?.hoursTotal || 30;
   const remainingHours = Math.max(0, totalHours - completedHours);
 
@@ -197,7 +197,6 @@ const SectionJazdy: React.FC<Props> = ({ drives, student, onReserve }) => {
           <div className="cal-legend">
             <span className="legend-dot dot-blue" /><span>Jazda odbyta</span>
             <span className="legend-dot dot-upcoming" /><span>Planowana</span>
-            <span className="legend-dot dot-green" /><span>Dziś</span>
           </div>
 
           {onReserve && (
