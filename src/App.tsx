@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { NavSection, Termin, Drive, Student } from './types';
-import { MOCK_STUDENT, MOCK_SCHOOL, MOCK_DRIVES, MOCK_DOCUMENTS, MOCK_TERMINY } from './mockData';
+import { MOCK_STUDENT, MOCK_SCHOOL, MOCK_DOCUMENTS } from './mockData';
 
 import Topbar from './components/Topbar';
 import Sidebar from './components/Sidebar';
@@ -14,6 +14,7 @@ import { BookingModal } from './components/BookingModal';
 import Toast, { type ToastMessage } from './components/Toast';
 import LoginScreen, { type UserSession } from './components/LoginScreen';
 import { InstructorPanel } from './components/InstructorPanel';
+import { OwnerPanel } from './components/OwnerPanel';
 import {
   fetchInstructors,
   fetchBookedRides,
@@ -32,6 +33,9 @@ function uid() {
 // ─── App ───────────────────────────────────────────────────────────────────
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [ownerPreview, setOwnerPreview] = useState(
+    () => import.meta.env.DEV && new URLSearchParams(window.location.search).has('owner-preview'),
+  );
   const [activeSection, setActiveSection] = useState<NavSection>('start');
   const [drives, setDrives] = useState<Drive[]>([]);
   const [terminy, setTerminy] = useState<Termin[]>([]);
@@ -118,6 +122,9 @@ const App: React.FC = () => {
 
   // Jeśli brak zalogowanego użytkownika -> ekran logowania
   if (!currentUser) {
+    if (ownerPreview) {
+      return <OwnerPanel onExit={() => setOwnerPreview(false)} />;
+    }
     return <LoginScreen onLogin={(session) => setCurrentUser(session)} />;
   }
 
