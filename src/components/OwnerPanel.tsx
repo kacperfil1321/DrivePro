@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MOCK_SCHOOL } from '../mockData';
-import { DEFAULT_INSTRUCTORS } from '../lib/bookingService';
+import {
+  DEFAULT_INSTRUCTORS,
+  fetchInstructors,
+  fetchAllDispositionsForMonth,
+  updateDispositionStatusByAdmin,
+  type Instructor,
+  type InstructorDisposition,
+} from '../lib/bookingService';
 import { supabase } from '../lib/supabase';
 import type { School } from '../types';
 
@@ -84,30 +91,6 @@ function toDateKey(date: Date): string {
 
 function formatPhone(phone?: string | null): string {
   return phone || '—';
-}
-
-function getAvailabilityForMonth(year: number, month: number): WorkAvailability[] {
-  const monthLength = new Date(year, month + 1, 0).getDate();
-  const patterns = [
-    { day: 3, instructorId: 2, shifts: [{ start: '14:00', end: '16:00' }, { start: '18:00', end: '20:00' }], status: 'submitted' as const },
-    { day: 5, instructorId: 3, shifts: [{ start: '08:00', end: '12:00' }], status: 'confirmed' as const },
-    { day: 8, instructorId: 4, shifts: [{ start: '10:00', end: '14:00' }, { start: '16:00', end: '18:00' }], status: 'submitted' as const },
-    { day: 10, instructorId: 2, shifts: [{ start: '09:00', end: '13:00' }], status: 'confirmed' as const },
-    { day: 12, instructorId: 3, shifts: [{ start: '14:00', end: '18:00' }], status: 'submitted' as const },
-    { day: 15, instructorId: 4, shifts: [{ start: '08:00', end: '10:00' }, { start: '12:00', end: '16:00' }], status: 'confirmed' as const },
-    { day: 18, instructorId: 2, shifts: [{ start: '14:00', end: '16:00' }, { start: '18:00', end: '20:00' }], status: 'submitted' as const },
-    { day: 21, instructorId: 3, shifts: [{ start: '10:00', end: '14:00' }], status: 'confirmed' as const },
-    { day: 24, instructorId: 4, shifts: [{ start: '08:00', end: '12:00' }, { start: '14:00', end: '16:00' }], status: 'submitted' as const },
-    { day: 27, instructorId: 2, shifts: [{ start: '12:00', end: '16:00' }], status: 'confirmed' as const },
-  ];
-
-  return patterns
-    .filter((entry) => entry.day <= monthLength)
-    .map((entry) => ({
-      ...entry,
-      id: `${year}-${month + 1}-${entry.day}-${entry.instructorId}`,
-      date: toDateKey(new Date(year, month, entry.day)),
-    }));
 }
 
 function initials(firstName: string, lastName: string): string {
@@ -269,11 +252,59 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
     setPkkError('');
   };
 
-  const instructors = DEFAULT_INSTRUCTORS;
-  const availability = useMemo(
-    () => getAvailabilityForMonth(calendarMonth.getFullYear(), calendarMonth.getMonth()),
-    [calendarMonth],
-  );
+  const [instructors, setInstructors] = useState<Instructor[]>(DEFAULT_INSTRUCTORS);
+  const [availabilityState, setAvailabilityState] = useState<WorkAvailability[]>([]);
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState<boolean>(false);
+
+  // Pobierz rzeczywistą listę instruktorów z bazy
+  useEffect(() => {
+    fetchInstructors().then((data) => {
+      if (data && data.length > 0) setInstructors(data);
+    });
+  }, []);
+
+  // Pobierz wyłącznie FAKTYCZNE dyspozycje instruktorów na dany miesiąc
+  useEffect(() => {
+    let isActive = true;
+    setIsLoadingAvailability(true);
+
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth() + 1;
+
+    fetchAllDispositionsForMonth(year, month).then((disps: InstructorDisposition[]) => {
+      if (!isActive) return;
+      const actualAvailability: WorkAvailability[] = disps
+        .filter((item) => item.status === 'oczekuje' || item.status === 'zatwierdzona')
+        .map((item) => ({
+          id: `${item.data}-${item.id_instruktora}`,
+          instructorId: item.id_instruktora,
+          date: item.data,
+          shifts: [{ start: item.godzina_od.slice(0, 5), end: item.godzina_do.slice(0, 5) }],
+          status: item.status === 'zatwierdzona' ? 'confirmed' : 'submitted',
+        }));
+      setAvailabilityState(actualAvailability);
+      setIsLoadingAvailability(false);
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [calendarMonth]);
+
+  const availability = availabilityState;
+
+  const handleApproveShift = async (entry: WorkAvailability) => {
+    setAvailabilityState((prev) =>
+      prev.map((item) => (item.id === entry.id ? { ...item, status: 'confirmed' } : item))
+    );
+
+    await updateDispositionStatusByAdmin(
+      entry.instructorId,
+      entry.date,
+      'zatwierdzona',
+      entry.shifts[0] ? { start: entry.shifts[0].start, end: entry.shifts[0].end } : undefined
+    );
+  };
   const availabilityByDate = useMemo(() => {
     const map = new Map<string, WorkAvailability[]>();
     availability.forEach((entry) => {
@@ -432,7 +463,6 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
           </tbody>
         </table>
       </div>
-      <p className="owner-demo-note">Dane instruktorów są przykładowe. Zarządzanie kontami i przypisaniami będzie podłączone do Supabase.</p>
     </section>
   );
 
@@ -579,10 +609,10 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
         </div>
 
         <div className="owner-calendar-legend">
-          <span><i className="submitted" />Zgłoszona dyspozycyjność ({totalPending})</span>
-          <span><i className="confirmed" />Potwierdzona ({totalConfirmed})</span>
+          <span><i className="submitted" />Zgłoszona dyspozycja ({totalPending})</span>
+          <span><i className="confirmed" />Zatwierdzona ({totalConfirmed})</span>
+          {isLoadingAvailability && <span style={{ marginLeft: 12, color: 'var(--gray-500)' }}>Wczytywanie dyspozycji...</span>}
         </div>
-        <p className="owner-demo-note">Przykładowy terminarz. Zgłaszanie dyspozycyjności od 15. dnia miesiąca i zatwierdzanie przez właściciela dodamy w kolejnym etapie.</p>
       </section>
 
       <aside className="owner-card owner-day-details">
@@ -604,7 +634,17 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
                       <span className="owner-shift-time" key={`${entry.id}-${shift.start}`}>{shift.start}<b>–</b>{shift.end}</span>
                     ))}
                   </div>
-                  <span className={`owner-status-pill ${entry.status === 'submitted' ? 'owner-status-pending' : 'owner-status-done'}`}><span />{entry.status === 'submitted' ? 'Do potwierdzenia' : 'Potwierdzona'}</span>
+                  <span className={`owner-status-pill ${entry.status === 'submitted' ? 'owner-status-pending' : 'owner-status-done'}`}><span />{entry.status === 'submitted' ? 'Do zatwierdzenia' : 'Zatwierdzona w grafiku'}</span>
+                  {entry.status === 'submitted' && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ marginTop: 8, padding: '4px 10px', fontSize: 11 }}
+                      onClick={() => handleApproveShift(entry)}
+                    >
+                      ✓ Zatwierdź do grafiku
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -631,10 +671,9 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
           <span className="owner-brand-icon"><svg viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="15.5" stroke="currentColor" strokeWidth="2.5" /><circle cx="18" cy="18" r="4.5" stroke="currentColor" strokeWidth="2.5" /><path d="M18 2.5v11m-11.5 13 8-6m14.5 6-8-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /></svg></span>
           <span className="owner-brand-name">DrivePro</span>
           <span className="owner-brand-divider" />
-          <span className="owner-panel-label">Panel właściciela</span>
+          <span className="owner-panel-label">Panel Właściciela</span>
         </div>
         <div className="owner-topbar-actions">
-          <span className="owner-preview-badge"><i />Podgląd demonstracyjny</span>
           <div className="owner-profile">
             <span className="owner-profile-avatar">WS</span>
             <span><strong>Właściciel szkoły</strong><small>{school.name}</small></span>
@@ -673,7 +712,7 @@ export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
         {activeTab === 'students' && renderStudentsTab()}
         {activeTab === 'calendar' && renderCalendarTab()}
 
-        <footer className="owner-footer"><span>DrivePro</span><i />Panel właściciela <span className="owner-footer-note">· dane demonstracyjne</span></footer>
+        <footer className="owner-footer"><span>DrivePro</span><i />Panel właściciela</footer>
       </main>
     </div>
   );

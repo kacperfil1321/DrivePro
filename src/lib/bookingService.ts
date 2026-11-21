@@ -19,25 +19,40 @@ export interface StudentProfile {
   user_id?: string | null;
 }
 
-// Stały tygodniowy grafik instruktora (np. wtorek-sobota 10:00-18:00)
+// ─────────────────────────────────────────────────────────────────────────────
+// JEDNA TABELA: DYSPOZYCJE I GRAFIK INSTRUKTORÓW
+// ─────────────────────────────────────────────────────────────────────────────
+// status: 'szkic' | 'oczekuje' (zgłoszona do admina) | 'zatwierdzona' (oficjalny grafik) | 'odrzucona'
+export type DispositionStatus = 'szkic' | 'oczekuje' | 'zatwierdzona' | 'odrzucona';
+
+export interface InstructorDisposition {
+  id?: number;
+  id_instruktora: number;
+  data: string; // YYYY-MM-DD
+  godzina_od: string; // "08:00" lub "08:00:00"
+  godzina_do: string; // "16:00" lub "16:00:00"
+  status: DispositionStatus;
+  uwagi?: string | null;
+}
+
+// Kompatybilność wsteczna typów
+export type OfficialScheduleEntry = InstructorDisposition;
 export interface WeeklyScheduleDay {
   id?: number;
   id_instruktora: number;
-  dzien_tygodnia: number; // 1 = Pn, 2 = Wt, ..., 7 = Nd
-  godzina_od: string; // "10:00:00"
-  godzina_do: string; // "18:00:00"
+  dzien_tygodnia: number;
+  godzina_od: string;
+  godzina_do: string;
   aktywny: boolean;
 }
-
-// Wyjątki od stałego grafiku na konkretną datę
 export interface AvailabilityException {
   id: number;
   id_instruktora: number;
-  data: string; // YYYY-MM-DD
-  typ: 'wolne' | 'praca'; // 'wolne' = cały dzień wolny; 'praca' = dodatkowe godziny
-  godzina_od?: string | null; // np. "09:00:00"
-  godzina_do?: string | null; // np. "15:00:00"
-  powod?: string | null; // np. "Urlop", "Sobota dodatkowa"
+  data: string;
+  typ: 'wolne' | 'praca';
+  godzina_od?: string | null;
+  godzina_do?: string | null;
+  powod?: string | null;
 }
 
 export interface RideReservation {
@@ -55,7 +70,7 @@ export interface RideReservation {
 }
 
 export interface AvailableSlot {
-  time: string; // np. "10:00" - godzina rozpoczęcia jazdy
+  time: string; // np. "10:00"
   endTime?: string; // np. "12:00"
   isAvailable: boolean;
   reason?: 'booked' | 'outside_working_hours' | 'day_off' | 'past' | 'too_far';
@@ -69,7 +84,6 @@ export function addHours(timeStr: string, hours: number): string {
   return `${String(endH).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
 }
 
-/** Formatuje przedział 2-godzinnej lekcji, np. "10:00" -> "10:00–12:00" */
 export function formatRideTimeRange(startTime: string): string {
   const [hStr, mStr] = (startTime || '10:00').split(':');
   const startH = parseInt(hStr, 10) || 10;
@@ -78,7 +92,6 @@ export function formatRideTimeRange(startTime: string): string {
   return `${String(startH).padStart(2, '0')}:${min}–${endH}:${min}`;
 }
 
-/** Bezpiecznie parsuje timestamp jazdy z bazy Supabase */
 export function parseRideTimestamp(dataStr?: string | null): { dateStr: string; timeStr: string } {
   if (!dataStr) {
     const today = new Date();
@@ -102,35 +115,12 @@ export function parseRideTimestamp(dataStr?: string | null): { dateStr: string; 
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    const h = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    return { dateStr: `${y}-${m}-${day}`, timeStr: `${h}:${min}` };
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return { dateStr: `${y}-${m}-${day}`, timeStr: `${hh}:${mm}` };
   }
 
-  return { dateStr: '', timeStr: '10:00' };
-}
-
-export const HOURLY_SLOTS = [
-  '07:00', '08:00', '09:00', '10:00', '11:00', '12:00',
-  '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'
-];
-
-/**
- * Zlicza dostępne sloty dla konkretnego dnia — używane przez mini-kalendarz do rysowania kropek.
- * Zwraca { total, free } uwzględniając grafik i rezerwacje 2-godzinnych lekcji.
- */
-export function countSlotsForDay(
-  dateStr: string,
-  instructorId: number,
-  bookedRides: RideReservation[] = [],
-  weeklySchedule: WeeklyScheduleDay[] = [],
-  exceptions: AvailabilityException[] = []
-): { total: number; free: number } {
-  const slots = calculateAvailableSlots(dateStr, instructorId, bookedRides, weeklySchedule, exceptions);
-  return {
-    total: slots.length,
-    free: slots.filter((s) => s.isAvailable).length,
-  };
+  return { dateStr: String(dataStr).slice(0, 10), timeStr: '10:00' };
 }
 
 export const DAYS_OF_WEEK = [
@@ -144,22 +134,15 @@ export const DAYS_OF_WEEK = [
 ];
 
 export const DEFAULT_INSTRUCTORS: Instructor[] = [
-  { id: 2, imie: 'Marek', nazwisko: 'Nowak', telefon: '+48 601 234 567' },
-  { id: 3, imie: 'Anna', nazwisko: 'Wiśniewska', telefon: '+48 602 345 678' },
-  { id: 4, imie: 'Piotr', nazwisko: 'Kowalski', telefon: '+48 603 456 789' },
+  { id: 2, imie: 'Marek', nazwisko: 'Nowak', telefon: '601 234 567' },
+  { id: 3, imie: 'Anna', nazwisko: 'Wiśniewska', telefon: '602 345 678' },
+  { id: 4, imie: 'Piotr', nazwisko: 'Kowalski', telefon: '603 456 789' },
 ];
 
-/**
- * Pobiera listę instruktorów
- */
 export async function fetchInstructors(): Promise<Instructor[]> {
   if (!supabase) return DEFAULT_INSTRUCTORS;
   try {
-    const { data, error } = await supabase
-      .from('instruktorzy')
-      .select('*')
-      .order('id', { ascending: true });
-
+    const { data, error } = await supabase.from('instruktorzy').select('*').order('id', { ascending: true });
     if (error || !data || data.length === 0) return DEFAULT_INSTRUCTORS;
     return data;
   } catch {
@@ -167,152 +150,274 @@ export async function fetchInstructors(): Promise<Instructor[]> {
   }
 }
 
-/**
- * Pobiera stały tygodniowy grafik instruktora
- */
-export async function fetchWeeklySchedule(instructorId: number): Promise<WeeklyScheduleDay[]> {
-  const defaultSchedule: WeeklyScheduleDay[] = [1, 2, 3, 4, 5, 6].map((day) => ({
-    id_instruktora: instructorId,
-    dzien_tygodnia: day,
-    godzina_od: '10:00:00',
-    godzina_do: '18:00:00',
-    aktywny: true,
-  }));
+// ─────────────────────────────────────────────────────────────────────────────
+// OPERACJE NA JEDNEJ TABELI: dyspozycje_instruktorow
+// ─────────────────────────────────────────────────────────────────────────────
 
-  if (!supabase) {
-    return defaultSchedule;
-  }
+/**
+ * Pobiera wszystkie dyspozycje dla wszystkich instruktorów na dany miesiąc (widok panelu administratora)
+ */
+export async function fetchAllDispositionsForMonth(
+  year: number,
+  month: number
+): Promise<InstructorDisposition[]> {
+  const monthStr = String(month).padStart(2, '0');
+  const startDate = `${year}-${monthStr}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+
+  const getLocal = (): InstructorDisposition[] => {
+    const list: InstructorDisposition[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('disp_list_') && key.endsWith(`_${year}_${month}`)) {
+        try {
+          const arr = JSON.parse(localStorage.getItem(key) || '[]');
+          list.push(...arr);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return list;
+  };
+
+  if (!supabase) return getLocal();
 
   try {
     const { data, error } = await supabase
-      .from('dyspozycyjnosc_instruktorow')
+      .from('dyspozycje_instruktorow')
+      .select('*')
+      .gte('data', startDate)
+      .lte('data', endDate)
+      .order('data', { ascending: true });
+
+    if (error || !data) return getLocal();
+    // Dołącz dane z localStorage jeśli były wprowadzane w sesji demo
+    const local = getLocal();
+    const map = new Map<string, InstructorDisposition>();
+    data.forEach((d) => map.set(`${d.id_instruktora}_${d.data}`, d));
+    local.forEach((l) => map.set(`${l.id_instruktora}_${l.data}`, l));
+    return Array.from(map.values());
+  } catch {
+    return getLocal();
+  }
+}
+
+export async function fetchDispositionsForMonth(
+  instructorId: number,
+  year: number,
+  month: number
+): Promise<InstructorDisposition[]> {
+  const monthStr = String(month).padStart(2, '0');
+  const startDate = `${year}-${monthStr}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+
+  const getLocal = (): InstructorDisposition[] => {
+    const local = localStorage.getItem(`disp_list_${instructorId}_${year}_${month}`);
+    return local ? JSON.parse(local) : [];
+  };
+
+  if (!supabase) return getLocal();
+
+  try {
+    const { data, error } = await supabase
+      .from('dyspozycje_instruktorow')
       .select('*')
       .eq('id_instruktora', instructorId)
-      .eq('aktywny', true);
+      .gte('data', startDate)
+      .lte('data', endDate)
+      .order('data', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      return defaultSchedule;
-    }
+    if (error || !data || data.length === 0) return getLocal();
     return data;
   } catch {
-    return defaultSchedule;
+    return getLocal();
   }
 }
 
 /**
- * Zapisuje/aktualizuje stały tygodniowy grafik instruktora
+ * Zapisuje lub aktualizuje dyspozycje na dany miesiąc (np. wysłanie ze statusem 'oczekuje')
  */
-export async function saveWeeklySchedule(
+export async function saveDispositionsForMonth(params: {
+  instructorId: number;
+  year: number;
+  month: number;
+  days: { data: string; godzina_od: string; godzina_do: string }[];
+  status: DispositionStatus;
+  uwagi?: string;
+}): Promise<{ success: boolean; error?: string; savedToDatabase: boolean }> {
+  const monthStr = String(params.month).padStart(2, '0');
+  const startDate = `${params.year}-${monthStr}-01`;
+  const lastDay = new Date(params.year, params.month, 0).getDate();
+  const endDate = `${params.year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+
+  const rows: InstructorDisposition[] = params.days.map((d, idx) => ({
+    id: Date.now() + idx,
+    id_instruktora: params.instructorId,
+    data: d.data,
+    godzina_od: d.godzina_od.length === 5 ? `${d.godzina_od}:00` : d.godzina_od,
+    godzina_do: d.godzina_do.length === 5 ? `${d.godzina_do}:00` : d.godzina_do,
+    status: params.status,
+    uwagi: params.uwagi || null,
+  }));
+
+  // Zapisz lokalnie w pamięci przeglądarki (fallback offline)
+  localStorage.setItem(`disp_list_${params.instructorId}_${params.year}_${params.month}`, JSON.stringify(rows));
+
+  if (!supabase) {
+    return { success: true, savedToDatabase: false, error: 'Brak konfiguracji klienta Supabase' };
+  }
+
+  try {
+    // 1. Usuń dotychczasowe wpisy z tego miesiąca dla instruktora
+    const { error: delError } = await supabase
+      .from('dyspozycje_instruktorow')
+      .delete()
+      .eq('id_instruktora', params.instructorId)
+      .gte('data', startDate)
+      .lte('data', endDate);
+
+    if (delError) {
+      console.error('Błąd usuwania poprzednich dyspozycji z Supabase:', delError);
+      return { success: true, savedToDatabase: false, error: delError.message };
+    }
+
+    // 2. Wstaw nowe wpisy
+    if (rows.length > 0) {
+      const insertData = rows.map(({ id: _ignored, ...rest }) => rest);
+      const { error: insError } = await supabase.from('dyspozycje_instruktorow').insert(insertData);
+      if (insError) {
+        console.error('Błąd wstawiania dyspozycji do Supabase:', insError);
+        return { success: true, savedToDatabase: false, error: insError.message };
+      }
+    }
+
+    return { success: true, savedToDatabase: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('Błąd połączenia z bazą Supabase przy zapisie dyspozycji:', msg);
+    return { success: true, savedToDatabase: false, error: msg };
+  }
+}
+
+/**
+ * Pobiera zatwierdzony oficjalny grafik (status = 'zatwierdzona') dla instruktora
+ */
+export async function fetchOfficialSchedule(
   instructorId: number,
-  schedule: { dzien_tygodnia: number; godzina_od: string; godzina_do: string; aktywny: boolean }[]
-): Promise<boolean> {
-  if (!supabase) return true;
-  try {
-    // Usuwamy dotychczasowy grafik instruktora
-    await supabase
-      .from('dyspozycyjnosc_instruktorow')
-      .delete()
-      .eq('id_instruktora', instructorId);
-
-    // Wstawiamy tylko aktywne dni
-    const activeDays = schedule
-      .filter((s) => s.aktywny)
-      .map((s) => ({
-        id_instruktora: instructorId,
-        dzien_tygodnia: s.dzien_tygodnia,
-        godzina_od: s.godzina_od.length === 5 ? `${s.godzina_od}:00` : s.godzina_od,
-        godzina_do: s.godzina_do.length === 5 ? `${s.godzina_do}:00` : s.godzina_do,
-        aktywny: true,
-      }));
-
-    if (activeDays.length > 0) {
-      const { error } = await supabase
-        .from('dyspozycyjnosc_instruktorow')
-        .insert(activeDays);
-      if (error) throw error;
+  startDate?: string,
+  endDate?: string
+): Promise<InstructorDisposition[]> {
+  const getLocal = (): InstructorDisposition[] => {
+    const list: InstructorDisposition[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(`disp_list_${instructorId}_`)) {
+        try {
+          const arr: InstructorDisposition[] = JSON.parse(localStorage.getItem(key) || '[]');
+          list.push(...arr.filter((item) => item.status === 'zatwierdzona'));
+        } catch {
+          // ignore
+        }
+      }
     }
+    return list;
+  };
 
-    return true;
-  } catch (err) {
-    console.error('Błąd zapisu grafiku tygodniowego:', err);
-    return false;
-  }
-}
+  if (!supabase) return getLocal();
 
-/**
- * Pobiera wyjątki od dyspozycyjności
- */
-export async function fetchExceptions(instructorId?: number): Promise<AvailabilityException[]> {
-  if (!supabase) return [];
   try {
-    let query = supabase.from('wyjatki_dyspozycyjnosci').select('*');
-    if (instructorId) {
-      query = query.eq('id_instruktora', instructorId);
-    }
+    let query = supabase
+      .from('dyspozycje_instruktorow')
+      .select('*')
+      .eq('id_instruktora', instructorId)
+      .eq('status', 'zatwierdzona')
+      .order('data', { ascending: true });
+
+    if (startDate) query = query.gte('data', startDate);
+    if (endDate) query = query.lte('data', endDate);
+
     const { data, error } = await query;
-    if (error || !data) return [];
+    if (error || !data || data.length === 0) return getLocal();
     return data;
   } catch {
-    return [];
+    return getLocal();
   }
 }
 
 /**
- * Dodaje wyjątek od dyspozycyjności (wolne lub dodatkowy dzień/godziny pracy)
+ * Administrator zatwierdza lub modyfikuje godziny konkretnego dnia dyspozycji
  */
-export async function addAvailabilityException(exception: {
-  id_instruktora: number;
-  data: string;
-  typ: 'wolne' | 'praca';
-  godzina_od?: string | null;
-  godzina_do?: string | null;
-  powod?: string | null;
-}): Promise<{ success: boolean; error?: string; data?: AvailabilityException }> {
-  if (!supabase) return { success: true };
-  try {
-    // Sprawdzamy czy dla tej daty nie ma już wyjątku, jeśli tak to usuwamy poprzedni
-    await supabase
-      .from('wyjatki_dyspozycyjnosci')
-      .delete()
-      .eq('id_instruktora', exception.id_instruktora)
-      .eq('data', exception.data);
+export async function updateDispositionStatusByAdmin(
+  instructorId: number,
+  dateStr: string,
+  newStatus: DispositionStatus,
+  hours?: { start: string; end: string }
+): Promise<boolean> {
+  // Aktualizacja w localStorage
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(`disp_list_${instructorId}_`)) {
+      try {
+        const arr: InstructorDisposition[] = JSON.parse(localStorage.getItem(key) || '[]');
+        const updated = arr.map((item) => {
+          if (item.data === dateStr) {
+            return {
+              ...item,
+              status: newStatus,
+              godzina_od: hours?.start ? `${hours.start}:00` : item.godzina_od,
+              godzina_do: hours?.end ? `${hours.end}:00` : item.godzina_do,
+            };
+          }
+          return item;
+        });
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+    }
+  }
 
-    const { data, error } = await supabase
-      .from('wyjatki_dyspozycyjnosci')
-      .insert({
-        id_instruktora: exception.id_instruktora,
-        data: exception.data,
-        typ: exception.typ,
-        godzina_od: exception.godzina_od ? (exception.godzina_od.length === 5 ? `${exception.godzina_od}:00` : exception.godzina_od) : null,
-        godzina_do: exception.godzina_do ? (exception.godzina_do.length === 5 ? `${exception.godzina_do}:00` : exception.godzina_do) : null,
-        powod: exception.powod || null,
-      })
-      .select()
-      .single();
+  if (!supabase) return true;
+
+  try {
+    const updatePayload: Partial<InstructorDisposition> = {
+      status: newStatus,
+    };
+    if (hours) {
+      updatePayload.godzina_od = hours.start.length === 5 ? `${hours.start}:00` : hours.start;
+      updatePayload.godzina_do = hours.end.length === 5 ? `${hours.end}:00` : hours.end;
+    }
+
+    const { error } = await supabase
+      .from('dyspozycje_instruktorow')
+      .update(updatePayload)
+      .eq('id_instruktora', instructorId)
+      .eq('data', dateStr);
 
     if (error) throw error;
-    return { success: true, data };
-  } catch (err: unknown) {
-    return { success: false, error: err instanceof Error ? err.message : 'Nieznany błąd' };
+    return true;
+  } catch (err) {
+    console.warn('Błąd updateDispositionStatusByAdmin:', err);
+    return true;
   }
 }
 
-/**
- * Usuwa wyjątek
- */
-export async function deleteAvailabilityException(exceptionId: number): Promise<boolean> {
-  if (!supabase) return true;
-  try {
-    const { error } = await supabase.from('wyjatki_dyspozycyjnosci').delete().eq('id', exceptionId);
-    return !error;
-  } catch {
-    return false;
-  }
+// Pomocnicze funkcje dla BookingModal / kompatybilności
+export async function fetchWeeklySchedule(_instructorId: number): Promise<WeeklyScheduleDay[]> {
+  return [];
 }
 
-/**
- * Pobiera wszystkie zarezerwowane jazdy (dla kursanta lub dla instruktora z danymi kursanta)
- */
+export async function fetchExceptions(_instructorId?: number): Promise<AvailabilityException[]> {
+  return [];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REZERWACJE JAZD I SLOTY
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function fetchBookedRides(instructorId?: number): Promise<RideReservation[]> {
   if (!supabase) return [];
   try {
@@ -323,9 +428,8 @@ export async function fetchBookedRides(instructorId?: number): Promise<RideReser
     const { data: rides, error } = await query;
     if (error || !rides) return [];
 
-    // Pobierz dane kursantów dla widoku instruktora
     const studentIds = Array.from(new Set(rides.map((r) => r.id_kursanta).filter(Boolean)));
-    let studentsMap = new Map<number, { imie: string; nazwisko: string; telefon?: string | null }>();
+    const studentsMap = new Map<number, { imie: string; nazwisko: string; telefon?: string | null }>();
 
     if (studentIds.length > 0) {
       const { data: students } = await supabase
@@ -348,19 +452,16 @@ export async function fetchBookedRides(instructorId?: number): Promise<RideReser
 }
 
 /**
- * Oblicza wolne sloty godzinowe dla wybranej daty i instruktora.
- * Uwzględnia:
- * 1. Zasadę max 2 tygodnie do przodu
- * 2. Wyjątki na dany dzień (np. urlop/wolne lub niestandardowe godziny)
- * 3. Stały tygodniowy grafik (np. wt-sb 10-18)
- * 4. Istniejące rezerwacje innych kursantów (termin znika / jest zablokowany)
+ * Oblicza dostępne sloty.
+ * Sprawdza w pierwszej kolejności zatwierdzoną dyspozycję (`status = 'zatwierdzona'`).
  */
 export function calculateAvailableSlots(
-  dateStr: string, // YYYY-MM-DD
+  dateStr: string,
   instructorId: number,
   bookedRides: RideReservation[] = [],
-  weeklySchedule: WeeklyScheduleDay[] = [],
-  exceptions: AvailabilityException[] = []
+  _weeklySchedule: WeeklyScheduleDay[] = [],
+  _exceptions: AvailabilityException[] = [],
+  officialSchedules: InstructorDisposition[] = []
 ): AvailableSlot[] {
   if (!dateStr || !instructorId) return [];
 
@@ -376,50 +477,30 @@ export function calculateAvailableSlots(
     return [];
   }
 
-  // Dzień tygodnia 1=Pn .. 7=Nd
-  const dayOfWeek = selectedDate.getDay() === 0 ? 7 : selectedDate.getDay();
-
-  // Sprawdzamy czy na ten dzień instruktor ma wyjątek
-  const dayException = (exceptions || []).find(
-    (e) => e && e.id_instruktora === instructorId && e.data === dateStr
+  // 1. Sprawdzamy zatwierdzoną dyspozycję instruktora na dany dzień
+  const dayEntry = (officialSchedules || []).find(
+    (e) => e.id_instruktora === instructorId && e.data === dateStr && e.status === 'zatwierdzona'
   );
 
-  // Jeśli ma wyjątek 'wolne' -> cały dzień niedostępny
-  if (dayException && dayException.typ === 'wolne') {
-    return [];
-  }
+  let startH = 0;
+  let endH = 0;
 
-  // Godziny pracy w tym dniu
-  let startHour = '';
-  let endHour = '';
-
-  if (dayException && dayException.typ === 'praca' && dayException.godzina_od && dayException.godzina_do) {
-    startHour = dayException.godzina_od.slice(0, 5);
-    endHour = dayException.godzina_do.slice(0, 5);
-  } else {
-    const regularDay = (weeklySchedule || []).find(
-      (s) => s && s.id_instruktora === instructorId && s.dzien_tygodnia === dayOfWeek && s.aktywny
-    );
-    if (regularDay && regularDay.godzina_od && regularDay.godzina_do) {
-      startHour = regularDay.godzina_od.slice(0, 5);
-      endHour = regularDay.godzina_do.slice(0, 5);
-    } else if (!weeklySchedule || weeklySchedule.length === 0) {
-      // Domyślny grafik jeśli grafik nie został jeszcze załadowany (Wt-Sb 10:00-18:00)
-      if (dayOfWeek >= 2 && dayOfWeek <= 6) {
-        startHour = '10:00';
-        endHour = '18:00';
-      }
+  if (dayEntry) {
+    startH = parseInt(dayEntry.godzina_od.split(':')[0], 10);
+    endH = parseInt(dayEntry.godzina_do.split(':')[0], 10);
+  } else if (!officialSchedules || officialSchedules.length === 0) {
+    // Domyślny grafik pomocniczy (Wt-Sb 10:00-18:00) gdy baza nie została jeszcze wypełniona
+    const dayOfWeek = selectedDate.getDay() === 0 ? 7 : selectedDate.getDay();
+    if (dayOfWeek >= 2 && dayOfWeek <= 6) {
+      startH = 10;
+      endH = 18;
     }
   }
 
-  if (!startHour || !endHour) {
+  if (startH === 0 || endH === 0 || startH >= endH) {
     return [];
   }
 
-  const startH = parseInt(startHour.split(':')[0], 10) || 10;
-  const endH = parseInt(endHour.split(':')[0], 10) || 18;
-
-  // Pobieramy rezerwacje tego instruktora w danym dniu
   const safeBookedRides = Array.isArray(bookedRides) ? bookedRides : [];
   const dayRides = safeBookedRides.filter((ride) => {
     if (!ride || ride.id_instruktora !== instructorId) return false;
@@ -434,7 +515,6 @@ export function calculateAvailableSlots(
     const slotEndTime = `${String(h + LESSON_DURATION_HOURS).padStart(2, '0')}:00`;
     const slotDateTime = new Date(`${dateStr}T${slotStartTime}:00`);
 
-    // 1. Czy slot minął
     if (slotDateTime <= now) {
       slots.push({
         time: slotStartTime,
@@ -445,7 +525,6 @@ export function calculateAvailableSlots(
       continue;
     }
 
-    // 2. Czy termin koliduje z inną rezerwacją (każda rezerwacja trwa 2h)
     const slotStartMin = h * 60;
     const slotEndMin = (h + LESSON_DURATION_HOURS) * 60;
 
@@ -454,7 +533,6 @@ export function calculateAvailableSlots(
       const [rH, rM] = parsed.timeStr.split(':').map(Number);
       const rideStartMin = (rH || 0) * 60 + (rM || 0);
       const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
-
       return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
     });
 
@@ -478,9 +556,28 @@ export function calculateAvailableSlots(
   return slots;
 }
 
-/**
- * Rezerwuje termin jazdy w bazie Supabase (zawsze 2 godziny lekcji)
- */
+export function countSlotsForDay(
+  dateStr: string,
+  instructorId: number,
+  bookedRides: RideReservation[] = [],
+  weeklySchedule: WeeklyScheduleDay[] = [],
+  exceptions: AvailabilityException[] = [],
+  officialSchedules: InstructorDisposition[] = []
+): { total: number; free: number } {
+  const slots = calculateAvailableSlots(
+    dateStr,
+    instructorId,
+    bookedRides,
+    weeklySchedule,
+    exceptions,
+    officialSchedules
+  );
+  return {
+    total: slots.length,
+    free: slots.filter((s) => s.isAvailable).length,
+  };
+}
+
 export async function bookRideInDatabase(params: {
   instructorId: number;
   dateStr: string;
@@ -510,7 +607,6 @@ export async function bookRideInDatabase(params: {
   }
 
   try {
-    // 1. Sprawdzenie czy inny kursant nie zajął terminu kolidującego z tą 2-godzinną lekcją
     const { data: existingRides } = await supabase
       .from('jazdy')
       .select('id, data')
@@ -524,19 +620,17 @@ export async function bookRideInDatabase(params: {
         const [rH, rM] = parsed.timeStr.split(':').map(Number);
         const rideStartMin = (rH || 0) * 60 + (rM || 0);
         const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
-
         return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
       });
 
       if (hasConflict) {
         return {
           success: false,
-          error: 'Ten termin (lub część 2-godzinnej lekcji) został już zarezerwowany przez innego kursanta. Wybierz inną godzinę.',
+          error: 'Ten termin (lub część 2-godzinnej lekcji) został już zarezerwowany przez innego kursanta.',
         };
       }
     }
 
-    // 2. Wstawienie nowej jazdy
     const { data, error } = await supabase
       .from('jazdy')
       .insert({
@@ -551,10 +645,7 @@ export async function bookRideInDatabase(params: {
 
     if (error) {
       if (error.code === '23505') {
-        return {
-          success: false,
-          error: 'Termin u tego instruktora jest już zajęty przez innego kursanta.',
-        };
+        return { success: false, error: 'Termin u tego instruktora jest już zajęty.' };
       }
       return { success: false, error: error.message };
     }

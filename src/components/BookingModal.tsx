@@ -4,11 +4,13 @@ import {
   type Instructor,
   type WeeklyScheduleDay,
   type AvailabilityException,
+  type OfficialScheduleEntry,
   type RideReservation,
   calculateAvailableSlots,
   countSlotsForDay,
   fetchWeeklySchedule,
   fetchExceptions,
+  fetchOfficialSchedule,
 } from '../lib/bookingService';
 
 interface Props {
@@ -107,9 +109,10 @@ export const BookingModal: React.FC<Props> = ({
     return d.getMonth();
   });
 
-  /* schedule / exceptions */
+  /* schedule / exceptions / official schedule */
   const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleDay[]>([]);
   const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
+  const [officialSchedules, setOfficialSchedules] = useState<OfficialScheduleEntry[]>([]);
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
 
   /* Sync first instructor */
@@ -127,11 +130,13 @@ export const BookingModal: React.FC<Props> = ({
     Promise.all([
       fetchWeeklySchedule(selectedInstructorId),
       fetchExceptions(selectedInstructorId),
+      fetchOfficialSchedule(selectedInstructorId),
     ])
-      .then(([ws, exc]) => {
+      .then(([ws, exc, off]) => {
         if (mounted) {
           setWeeklySchedule(ws);
           setExceptions(exc);
+          setOfficialSchedules(off);
         }
       })
       .catch((err) => console.error('Błąd grafiku:', err))
@@ -147,9 +152,10 @@ export const BookingModal: React.FC<Props> = ({
       selectedInstructorId,
       bookedRides,
       weeklySchedule,
-      exceptions
+      exceptions,
+      officialSchedules
     );
-  }, [selectedDate, selectedInstructorId, bookedRides, weeklySchedule, exceptions]);
+  }, [selectedDate, selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules]);
 
   /* Show only working-hours slots (hide outside_working_hours silently) */
   const visibleSlots = useMemo(
@@ -199,8 +205,8 @@ export const BookingModal: React.FC<Props> = ({
 
   /* Dot count cache per day */
   const getDotInfo = useCallback((dateStr: string) => {
-    return countSlotsForDay(dateStr, selectedInstructorId, bookedRides, weeklySchedule, exceptions);
-  }, [selectedInstructorId, bookedRides, weeklySchedule, exceptions]);
+    return countSlotsForDay(dateStr, selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules);
+  }, [selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules]);
 
   /* Submit */
   const selectedInstructor = instructors.find((i) => i.id === selectedInstructorId);
