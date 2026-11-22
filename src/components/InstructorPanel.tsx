@@ -34,6 +34,10 @@ function toDateKey(year: number, month: number, day: number): string {
 export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotify }) => {
   const [activeTab, setActiveTab] = useState<'dyspozycja' | 'grafik' | 'kalendarz'>('dyspozycja');
 
+  useEffect(() => {
+    document.title = 'DrivePro · Panel instruktora';
+  }, []);
+
   const today = useMemo(() => new Date(), []);
   const nextMonthInitial = useMemo(() => {
     const d = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -347,7 +351,7 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
             <line x1="8" y1="2" x2="8" y2="6" />
             <line x1="3" y1="10" x2="21" y2="10" />
           </svg>
-          <span>Oficjalny grafik pracy</span>
+          <span>Grafik pracy</span>
           {officialSchedules.length > 0 && (
             <span className="owner-tab-badge">{officialSchedules.length} dni</span>
           )}

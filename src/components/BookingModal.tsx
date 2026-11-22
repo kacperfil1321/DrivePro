@@ -2,15 +2,12 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Modal from './Modal';
 import {
   type Instructor,
-  type WeeklyScheduleDay,
-  type AvailabilityException,
   type OfficialScheduleEntry,
   type RideReservation,
   calculateAvailableSlots,
   countSlotsForDay,
-  fetchWeeklySchedule,
-  fetchExceptions,
   fetchOfficialSchedule,
+  getMaxBookingDate,
 } from '../lib/bookingService';
 
 interface Props {
@@ -86,10 +83,10 @@ export const BookingModal: React.FC<Props> = ({
     return toDateStr(d);
   }, []);
   const maxDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    return d;
+    return getMaxBookingDate();
   }, []);
+  const todayStr = toDateStr(today);
+  const maxDateStr = toDateStr(maxDate);
 
   const [selectedInstructorId, setSelectedInstructorId] = useState<number>(
     instructors[0]?.id || 0
@@ -109,9 +106,7 @@ export const BookingModal: React.FC<Props> = ({
     return d.getMonth();
   });
 
-  /* schedule / exceptions / official schedule */
-  const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleDay[]>([]);
-  const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
+  /* Approved instructor availability */
   const [officialSchedules, setOfficialSchedules] = useState<OfficialScheduleEntry[]>([]);
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
 
@@ -127,22 +122,16 @@ export const BookingModal: React.FC<Props> = ({
     if (!selectedInstructorId) return;
     let mounted = true;
     setIsLoadingSchedule(true);
-    Promise.all([
-      fetchWeeklySchedule(selectedInstructorId),
-      fetchExceptions(selectedInstructorId),
-      fetchOfficialSchedule(selectedInstructorId),
-    ])
-      .then(([ws, exc, off]) => {
+    fetchOfficialSchedule(selectedInstructorId, todayStr, maxDateStr)
+      .then((off) => {
         if (mounted) {
-          setWeeklySchedule(ws);
-          setExceptions(exc);
           setOfficialSchedules(off);
         }
       })
       .catch((err) => console.error('Błąd grafiku:', err))
       .finally(() => { if (mounted) setIsLoadingSchedule(false); });
     return () => { mounted = false; };
-  }, [selectedInstructorId]);
+  }, [selectedInstructorId, todayStr, maxDateStr]);
 
   /* Slots for selected day */
   const slots = useMemo(() => {
@@ -151,11 +140,11 @@ export const BookingModal: React.FC<Props> = ({
       selectedDate,
       selectedInstructorId,
       bookedRides,
-      weeklySchedule,
-      exceptions,
+      [],
+      [],
       officialSchedules
     );
-  }, [selectedDate, selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules]);
+  }, [selectedDate, selectedInstructorId, bookedRides, officialSchedules]);
 
   /* Show only working-hours slots (hide outside_working_hours silently) */
   const visibleSlots = useMemo(
@@ -205,15 +194,11 @@ export const BookingModal: React.FC<Props> = ({
 
   /* Dot count cache per day */
   const getDotInfo = useCallback((dateStr: string) => {
-    return countSlotsForDay(dateStr, selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules);
-  }, [selectedInstructorId, bookedRides, weeklySchedule, exceptions, officialSchedules]);
+    return countSlotsForDay(dateStr, selectedInstructorId, bookedRides, [], [], officialSchedules);
+  }, [selectedInstructorId, bookedRides, officialSchedules]);
 
   /* Submit */
   const selectedInstructor = instructors.find((i) => i.id === selectedInstructorId);
-  const selectedSlot = useMemo(
-    () => visibleSlots.find((s) => s.time === selectedTime),
-    [visibleSlots, selectedTime]
-  );
 
   const handleSubmit = async () => {
     if (!selectedDate || !selectedTime || !selectedInstructorId) {
@@ -241,9 +226,6 @@ export const BookingModal: React.FC<Props> = ({
       setIsSubmitting(false);
     }
   };
-
-  const todayStr = toDateStr(today);
-  const maxDateStr = toDateStr(maxDate);
 
   return (
     <Modal

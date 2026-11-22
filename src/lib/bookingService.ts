@@ -78,6 +78,36 @@ export interface AvailableSlot {
 
 export const LESSON_DURATION_HOURS = 2; // Każda lekcja jazdy trwa 2 godziny
 
+function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getMaxBookingDate(now: Date = new Date()): Date {
+  const maxDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  maxDate.setDate(maxDate.getDate() + 14);
+  return maxDate;
+}
+
+export function isBookingDateAllowed(dateStr: string, now: Date = new Date()): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return false;
+  }
+
+  return dateStr > toLocalDateKey(now) && dateStr <= toLocalDateKey(getMaxBookingDate(now));
+}
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + (minutes || 0);
+}
+
 export function addHours(timeStr: string, hours: number): string {
   const [h, m] = (timeStr || '10:00').split(':').map(Number);
   const endH = (h || 0) + hours;
@@ -464,42 +494,17 @@ export function calculateAvailableSlots(
   officialSchedules: InstructorDisposition[] = []
 ): AvailableSlot[] {
   if (!dateStr || !instructorId) return [];
-
-  const now = new Date();
-  const selectedDate = new Date(`${dateStr}T12:00:00`);
-
-  // Max 2 tygodnie w przód (14 dni)
-  const maxBookingDate = new Date();
-  maxBookingDate.setDate(maxBookingDate.getDate() + 14);
-  maxBookingDate.setHours(23, 59, 59, 999);
-
-  if (selectedDate > maxBookingDate) {
-    return [];
-  }
+  if (!isBookingDateAllowed(dateStr)) return [];
 
   // 1. Sprawdzamy zatwierdzoną dyspozycję instruktora na dany dzień
   const dayEntry = (officialSchedules || []).find(
     (e) => e.id_instruktora === instructorId && e.data === dateStr && e.status === 'zatwierdzona'
   );
 
-  let startH = 0;
-  let endH = 0;
-
-  if (dayEntry) {
-    startH = parseInt(dayEntry.godzina_od.split(':')[0], 10);
-    endH = parseInt(dayEntry.godzina_do.split(':')[0], 10);
-  } else if (!officialSchedules || officialSchedules.length === 0) {
-    // Domyślny grafik pomocniczy (Wt-Sb 10:00-18:00) gdy baza nie została jeszcze wypełniona
-    const dayOfWeek = selectedDate.getDay() === 0 ? 7 : selectedDate.getDay();
-    if (dayOfWeek >= 2 && dayOfWeek <= 6) {
-      startH = 10;
-      endH = 18;
-    }
-  }
-
-  if (startH === 0 || endH === 0 || startH >= endH) {
-    return [];
-  }
+  if (!dayEntry) return [];
+  const startMin = timeToMinutes(dayEntry.godzina_od);
+  const endMin = timeToMinutes(dayEntry.godzina_do);
+  if (startMin >= endMin) return [];
 
   const safeBookedRides = Array.isArray(bookedRides) ? bookedRides : [];
   const dayRides = safeBookedRides.filter((ride) => {
@@ -510,12 +515,17 @@ export function calculateAvailableSlots(
 
   const slots: AvailableSlot[] = [];
 
-  for (let h = startH; h + LESSON_DURATION_HOURS <= endH; h += LESSON_DURATION_HOURS) {
-    const slotStartTime = `${String(h).padStart(2, '0')}:00`;
-    const slotEndTime = `${String(h + LESSON_DURATION_HOURS).padStart(2, '0')}:00`;
+  for (
+    let slotStartMin = startMin;
+    slotStartMin + LESSON_DURATION_HOURS * 60 <= endMin;
+    slotStartMin += LESSON_DURATION_HOURS * 60
+  ) {
+    const slotEndMin = slotStartMin + LESSON_DURATION_HOURS * 60;
+    const slotStartTime = `${String(Math.floor(slotStartMin / 60)).padStart(2, '0')}:${String(slotStartMin % 60).padStart(2, '0')}`;
+    const slotEndTime = `${String(Math.floor(slotEndMin / 60)).padStart(2, '0')}:${String(slotEndMin % 60).padStart(2, '0')}`;
     const slotDateTime = new Date(`${dateStr}T${slotStartTime}:00`);
 
-    if (slotDateTime <= now) {
+    if (slotDateTime <= new Date()) {
       slots.push({
         time: slotStartTime,
         endTime: slotEndTime,
@@ -525,13 +535,9 @@ export function calculateAvailableSlots(
       continue;
     }
 
-    const slotStartMin = h * 60;
-    const slotEndMin = (h + LESSON_DURATION_HOURS) * 60;
-
     const isBooked = dayRides.some((ride) => {
       const parsed = parseRideTimestamp(ride.data);
-      const [rH, rM] = parsed.timeStr.split(':').map(Number);
-      const rideStartMin = (rH || 0) * 60 + (rM || 0);
+      const rideStartMin = timeToMinutes(parsed.timeStr);
       const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
       return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
     });
@@ -586,11 +592,28 @@ export async function bookRideInDatabase(params: {
   notes?: string;
   studentId?: number | null;
 }): Promise<{ success: boolean; error?: string; ride?: RideReservation }> {
+  if (!isBookingDateAllowed(params.dateStr)) {
+    return { success: false, error: 'Można rezerwować wyłącznie terminy od jutra do 14 dni naprzód.' };
+  }
+
+  const officialSchedules = await fetchOfficialSchedule(
+    params.instructorId,
+    params.dateStr,
+    params.dateStr
+  );
+  const availableSlots = calculateAvailableSlots(
+    params.dateStr,
+    params.instructorId,
+    [],
+    [],
+    [],
+    officialSchedules
+  );
+  if (!availableSlots.some((slot) => slot.time === params.timeStr && slot.isAvailable)) {
+    return { success: false, error: 'Wybrany termin nie znajduje się w zatwierdzonym grafiku instruktora.' };
+  }
+
   const timestamp = `${params.dateStr}T${params.timeStr}:00`;
-  const startHour = parseInt(params.timeStr.split(':')[0], 10) || 10;
-  const startMin = parseInt(params.timeStr.split(':')[1] || '0', 10) || 0;
-  const slotStartMin = startHour * 60 + startMin;
-  const slotEndMin = slotStartMin + LESSON_DURATION_HOURS * 60;
 
   if (!supabase) {
     return {
@@ -607,28 +630,33 @@ export async function bookRideInDatabase(params: {
   }
 
   try {
-    const { data: existingRides } = await supabase
+    const { data: existingRides, error: ridesError } = await supabase
       .from('jazdy')
       .select('id, data')
       .eq('id_instruktora', params.instructorId);
 
-    if (existingRides && existingRides.length > 0) {
-      const hasConflict = existingRides.some((r) => {
-        if (!r.data) return false;
-        const parsed = parseRideTimestamp(r.data);
-        if (parsed.dateStr !== params.dateStr) return false;
-        const [rH, rM] = parsed.timeStr.split(':').map(Number);
-        const rideStartMin = (rH || 0) * 60 + (rM || 0);
-        const rideEndMin = rideStartMin + LESSON_DURATION_HOURS * 60;
-        return slotStartMin < rideEndMin && slotEndMin > rideStartMin;
-      });
+    if (ridesError) {
+      return { success: false, error: ridesError.message };
+    }
 
-      if (hasConflict) {
-        return {
-          success: false,
-          error: 'Ten termin (lub część 2-godzinnej lekcji) został już zarezerwowany przez innego kursanta.',
-        };
-      }
+    const bookedRidesForInstructor: RideReservation[] = (existingRides || []).map((ride) => ({
+      id: ride.id,
+      id_instruktora: params.instructorId,
+      data: ride.data,
+    }));
+    const confirmedSlots = calculateAvailableSlots(
+      params.dateStr,
+      params.instructorId,
+      bookedRidesForInstructor,
+      [],
+      [],
+      officialSchedules
+    );
+    if (!confirmedSlots.some((slot) => slot.time === params.timeStr && slot.isAvailable)) {
+      return {
+        success: false,
+        error: 'Ten termin (lub część 2-godzinnej lekcji) został już zarezerwowany przez innego kursanta.',
+      };
     }
 
     const { data, error } = await supabase

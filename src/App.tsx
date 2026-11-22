@@ -45,6 +45,25 @@ const App: React.FC = () => {
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [bookedRides, setBookedRides] = useState<RideReservation[]>([]);
 
+  // ── Dynamiczny tytuł strony zależny od roli/panelu ─────────────────────────
+  useEffect(() => {
+    if (!currentUser) {
+      if (ownerPreview) {
+        document.title = 'DrivePro · Panel właściciela';
+      } else {
+        document.title = 'DrivePro · Logowanie';
+      }
+      return;
+    }
+
+    if (currentUser.role === 'instructor') {
+      document.title = 'DrivePro · Panel instruktora';
+      return;
+    }
+
+    document.title = 'DrivePro · Panel kursanta';
+  }, [currentUser, ownerPreview]);
+
   // Pobieranie danych z Supabase przy zmianie użytkownika / starcie
   useEffect(() => {
     async function loadData() {

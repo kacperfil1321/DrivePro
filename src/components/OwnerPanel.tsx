@@ -100,6 +100,10 @@ function initials(firstName: string, lastName: string): string {
 export const OwnerPanel: React.FC<Props> = ({ onExit }) => {
   const [now] = useState(() => new Date());
   const [activeTab, setActiveTab] = useState<OwnerTab>('school');
+
+  useEffect(() => {
+    document.title = 'DrivePro · Panel właściciela';
+  }, []);
   const [school, setSchool] = useState<School>(MOCK_SCHOOL);
   const [isEditingSchool, setIsEditingSchool] = useState(false);
   const [schoolSaved, setSchoolSaved] = useState(false);
