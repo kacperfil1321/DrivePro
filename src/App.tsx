@@ -350,6 +350,7 @@ const App: React.FC = () => {
         onClose={() => setReserveOpen(false)}
         instructors={instructors}
         bookedRides={bookedRides}
+        studentId={currentUser.id}
         onConfirm={handleBookingConfirm}
       />
 

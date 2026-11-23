@@ -77,21 +77,30 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
 
       const userId = authData.user.id;
 
-      if (role === 'instructor') {
-        // Szukamy instruktora powiązanego z tym kontem auth (przez user_id)
-        const { data: insData, error: insError } = await supabase
+      const [{ data: insData }, { data: studentData }] = await Promise.all([
+        supabase
           .from('instruktorzy')
           .select('*')
           .eq('user_id', userId)
-          .maybeSingle();
+          .maybeSingle(),
+        supabase
+          .from('kursanci')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
+      ]);
 
-        if (insError) {
-          console.error('Błąd pobierania instruktora:', insError);
-          setErrorMessage('Błąd bazy danych przy pobieraniu danych instruktora.');
-          return;
-        }
+      if (role === 'student' && insData) {
+        await supabase.auth.signOut();
+        setErrorMessage(
+          'To konto należy do instruktora. Zaloguj się w panelu instruktora.'
+        );
+        return;
+      }
 
+      if (role === 'instructor') {
         if (!insData) {
+          await supabase.auth.signOut();
           setErrorMessage(
             'Zalogowano do Supabase, ale to konto nie jest przypisane do żadnego instruktora. ' +
             'Skontaktuj się z administratorem, aby powiązać konto z tabelą instruktorzy (user_id).'
@@ -111,25 +120,21 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
       }
 
       // ── LOGOWANIE KURSANTA ─────────────────────────────────────────────────
-      const { data: studentData, error: studentError } = await supabase
-        .from('kursanci')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (studentError) {
-        console.warn('Nie udało się pobrać rekordu z tabeli kursanci:', studentError);
+      if (!studentData) {
+        await supabase.auth.signOut();
+        setErrorMessage(
+          'To konto nie jest przypisane do żadnego kursanta. Zaloguj się w odpowiednim panelu.'
+        );
+        return;
       }
 
       onLogin({
         role: 'student',
-        id: studentData?.id || 1,
-        name: studentData
-          ? `${studentData.imie} ${studentData.nazwisko}`
-          : (authData.user.email?.split('@')[0] || 'Kursant'),
-        email: studentData?.email || trimmedEmail,
-        phone: studentData?.telefon || undefined,
-        student: studentData || undefined,
+        id: studentData.id,
+        name: `${studentData.imie} ${studentData.nazwisko}`,
+        email: studentData.email || trimmedEmail,
+        phone: studentData.telefon || undefined,
+        student: studentData,
       });
     } catch (err: unknown) {
       setErrorMessage(
@@ -254,7 +259,7 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             <p>
               {isInstructor
                 ? 'Ustalaj stały tygodniowy grafik, dodawaj urlopy lub dyżury i przeglądaj kalendarz jazd kursantów.'
-                : 'Miej swój kurs zawsze pod kontrolą. Rezerwuj jazdy z instruktorami do 2 tygodni naprzód.'}
+                : 'Miej swój kurs zawsze pod kontrolą. Rezerwuj jazdy z instruktorami na dowolny termin.'}
             </p>
           </div>
 
@@ -372,10 +377,19 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
 
             {errorMessage && (
               <div className="login-alert-error" role="alert">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                <svg
+                  className="login-alert-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
                 <span>{errorMessage}</span>
               </div>

@@ -6,6 +6,7 @@ export interface Instructor {
   nazwisko: string;
   telefon?: string | null;
   user_id?: string | null;
+  etat?: 'pełny etat' | '1/4 etatu' | '1/2 etatu' | '3/4 etatu' | 'zlecenie' | null;
 }
 
 export interface StudentProfile {
@@ -22,7 +23,7 @@ export interface StudentProfile {
 // ─────────────────────────────────────────────────────────────────────────────
 // JEDNA TABELA: DYSPOZYCJE I GRAFIK INSTRUKTORÓW
 // ─────────────────────────────────────────────────────────────────────────────
-// status: 'szkic' | 'oczekuje' (zgłoszona do admina) | 'zatwierdzona' (oficjalny grafik) | 'odrzucona'
+// status: 'szkic' | 'oczekuje' (zgłoszona do admina) | 'zatwierdzona' (grafik) | 'odrzucona'
 export type DispositionStatus = 'szkic' | 'oczekuje' | 'zatwierdzona' | 'odrzucona';
 
 export interface InstructorDisposition {
@@ -87,7 +88,7 @@ function toLocalDateKey(date: Date): string {
 
 export function getMaxBookingDate(now: Date = new Date()): Date {
   const maxDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  maxDate.setDate(maxDate.getDate() + 14);
+  maxDate.setFullYear(maxDate.getFullYear() + 100);
   return maxDate;
 }
 
@@ -100,7 +101,7 @@ export function isBookingDateAllowed(dateStr: string, now: Date = new Date()): b
     return false;
   }
 
-  return dateStr > toLocalDateKey(now) && dateStr <= toLocalDateKey(getMaxBookingDate(now));
+  return dateStr > toLocalDateKey(now);
 }
 
 function timeToMinutes(time: string): number {
@@ -333,7 +334,7 @@ export async function saveDispositionsForMonth(params: {
 }
 
 /**
- * Pobiera zatwierdzony oficjalny grafik (status = 'zatwierdzona') dla instruktora
+ * Pobiera zatwierdzony grafik (status = 'zatwierdzona') dla instruktora
  */
 export async function fetchOfficialSchedule(
   instructorId: number,
@@ -593,7 +594,7 @@ export async function bookRideInDatabase(params: {
   studentId?: number | null;
 }): Promise<{ success: boolean; error?: string; ride?: RideReservation }> {
   if (!isBookingDateAllowed(params.dateStr)) {
-    return { success: false, error: 'Można rezerwować wyłącznie terminy od jutra do 14 dni naprzód.' };
+    return { success: false, error: 'Można rezerwować wyłącznie przyszłe terminy.' };
   }
 
   const officialSchedules = await fetchOfficialSchedule(
@@ -630,6 +631,27 @@ export async function bookRideInDatabase(params: {
   }
 
   try {
+    if (params.studentId) {
+      const start = `${params.dateStr}T00:00:00`;
+      const end = `${params.dateStr}T23:59:59`;
+      const { data: studentRides, error: studentRidesError } = await supabase
+        .from('jazdy')
+        .select('id')
+        .eq('id_kursanta', params.studentId)
+        .gte('data', start)
+        .lte('data', end);
+
+      if (studentRidesError) {
+        return { success: false, error: studentRidesError.message };
+      }
+      if ((studentRides || []).length > 0) {
+        return {
+          success: false,
+          error: 'Możesz zarezerwować tylko jedną jazdę w tym samym dniu.',
+        };
+      }
+    }
+
     const { data: existingRides, error: ridesError } = await supabase
       .from('jazdy')
       .select('id, data')

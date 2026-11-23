@@ -32,7 +32,7 @@ function toDateKey(year: number, month: number, day: number): string {
 }
 
 export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotify }) => {
-  const [activeTab, setActiveTab] = useState<'dyspozycja' | 'grafik' | 'kalendarz'>('dyspozycja');
+  const [activeTab, setActiveTab] = useState<'dyspozycja' | 'grafik'>('grafik');
 
   useEffect(() => {
     document.title = 'DrivePro · Panel instruktora';
@@ -56,6 +56,7 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
 
   // Aktywnie zaznaczony dzień do bezpośredniej edycji godzin
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [selectedScheduleDayKey, setSelectedScheduleDayKey] = useState<string | null>(null);
 
   // Grafik zatwierdzony przez administratora (status = 'zatwierdzona')
   const [officialSchedules, setOfficialSchedules] = useState<InstructorDisposition[]>([]);
@@ -63,8 +64,6 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
 
   // Kalendarz rezerwacji kursantów
   const [rides, setRides] = useState<RideReservation[]>([]);
-  const [ridesFilter, setRidesFilter] = useState<'all' | 'upcoming' | 'past'>('upcoming');
-  const [isLoadingRides, setIsLoadingRides] = useState(false);
 
   // Wczytanie dyspozycji z jednej tabeli dyspozycje_instruktorow
   const loadDisposition = useCallback(async (year: number, month: number) => {
@@ -103,14 +102,11 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
 
   // Wczytanie rezerwacji jazd
   const loadRides = useCallback(async () => {
-    setIsLoadingRides(true);
     try {
       const data = await fetchBookedRides(instructor.id);
       setRides(data);
     } catch (err) {
       console.error('Błąd pobierania rezerwacji jazd:', err);
-    } finally {
-      setIsLoadingRides(false);
     }
   }, [instructor.id]);
 
@@ -280,16 +276,11 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
   };
 
   // Filtrowanie jazd
-  const now = new Date();
-  const filteredRides = rides.filter((r) => {
-    const rDate = new Date(r.data);
-    if (ridesFilter === 'upcoming') return rDate >= now;
-    if (ridesFilter === 'past') return rDate < now;
-    return true;
-  });
-
-  const upcomingCount = rides.filter((r) => new Date(r.data) >= now).length;
-  const pastCount = rides.filter((r) => new Date(r.data) < now).length;
+  const monthPrefix = toDateKey(dispYear, dispMonth, 1).slice(0, 7);
+  const schedulesForMonth = officialSchedules.filter((entry) => entry.data.startsWith(monthPrefix));
+  const ridesForMonth = rides.filter((ride) =>
+    parseRideTimestamp(ride.data).dateStr.startsWith(monthPrefix),
+  );
 
   return (
     <div className="owner-app-shell">
@@ -325,6 +316,20 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
       <nav className="owner-tabs" aria-label="Nawigacja panelu instruktora">
         <button
           type="button"
+          className={`owner-tab${activeTab === 'grafik' ? ' active' : ''}`}
+          onClick={() => setActiveTab('grafik')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Grafik pracy</span>
+        </button>
+
+        <button
+          type="button"
           className={`owner-tab${activeTab === 'dyspozycja' ? ' active' : ''}`}
           onClick={() => setActiveTab('dyspozycja')}
         >
@@ -340,37 +345,6 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
           )}
         </button>
 
-        <button
-          type="button"
-          className={`owner-tab${activeTab === 'grafik' ? ' active' : ''}`}
-          onClick={() => setActiveTab('grafik')}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-          <span>Grafik pracy</span>
-          {officialSchedules.length > 0 && (
-            <span className="owner-tab-badge">{officialSchedules.length} dni</span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          className={`owner-tab${activeTab === 'kalendarz' ? ' active' : ''}`}
-          onClick={() => setActiveTab('kalendarz')}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          <span>Rezerwacje i jazdy</span>
-          {upcomingCount > 0 && (
-            <span className="owner-tab-badge">{upcomingCount}</span>
-          )}
-        </button>
       </nav>
 
       {/* Główna zawartość */}
@@ -380,18 +354,13 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
             <span className="owner-breadcrumb">
               PANEL INSTRUKTORA <b>/</b>{' '}
               {activeTab === 'dyspozycja' && 'MOJA DYSPOZYCJA'}
-              {activeTab === 'grafik' && 'OFICJALNY GRAFIK PRACY'}
-              {activeTab === 'kalendarz' && 'REZERWACJE I JAZDY'}
+              {activeTab === 'grafik' && 'GRAFIK PRACY'}
             </span>
             <h1>
               {activeTab === 'dyspozycja' && 'Moja dyspozycja'}
-              {activeTab === 'grafik' && 'Oficjalny grafik pracy'}
-              {activeTab === 'kalendarz' && 'Rezerwacje i jazdy'}
+              {activeTab === 'grafik' && 'Grafik pracy'}
             </h1>
           </div>
-          <span className="owner-current-date">
-            {today.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </span>
         </div>
 
         {/* ─── ZAKŁADKA 1: DYSPOZYCJA MIESIĘCZNA ──────────────────────── */}
@@ -677,219 +646,162 @@ export const InstructorPanel: React.FC<Props> = ({ instructor, onLogout, onNotif
           </div>
         )}
 
-        {/* ─── ZAKŁADKA 2: OFICJALNY GRAFIK OD ADMINA ──────────────────── */}
+        {/* ─── ZAKŁADKA 2: GRAFIK OD ADMINA ──────────────────── */}
         {activeTab === 'grafik' && (
-          <div className="card instructor-card">
-            <div className="card-header">
-              <div className="card-title-group">
-                <span className="card-icon blue">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <line x1="16" y1="2" x2="16" y2="6" />
-                    <line x1="8" y1="2" x2="8" y2="6" />
-                    <line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                </span>
+          <div className="disp-layout-grid instructor-schedule-layout">
+            <div className="card instructor-card">
+              <div className="disp-header-bar">
                 <div>
-                  <h2 className="card-title">Oficjalny grafik pracy zatwierdzony przez administratora</h2>
-                  <p className="card-subtitle">
-                    Harmonogram zatwierdzonych dni dyżuru. Na podstawie tych godzin kursanci dokonują rezerwacji.
-                  </p>
+                  <h2 className="card-title">Grafik pracy</h2>
+                  <p className="card-subtitle">Godziny dyżuru oraz liczba rezerwacji w każdym dniu.</p>
+                </div>
+                <div className="month-picker-controls">
+                  <button type="button" className="cal-nav-btn" onClick={handlePrevMonth}>‹</button>
+                  <span className="current-month-label">{MONTH_NAMES_PL[dispMonth - 1]} {dispYear}</span>
+                  <button type="button" className="cal-nav-btn" onClick={handleNextMonth}>›</button>
                 </div>
               </div>
-            </div>
 
-            {isLoadingSchedule ? (
-              <div className="instructor-loading">Pobieranie grafiku pracy...</div>
-            ) : officialSchedules.length === 0 ? (
-              <div className="instructor-empty-state">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="48" height="48" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                  <line x1="16" y1="2" x2="16" y2="6" />
-                  <line x1="8" y1="2" x2="8" y2="6" />
-                  <line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-                <p className="empty-title">Brak zatwierdzonego grafiku na ten okres</p>
-                <p className="empty-desc">
-                  Administrator nie zatwierdził jeszcze dni pracy dla Twojego profilu. Upewnij się, że wysłałeś dyspozycję w zakładce <strong>Moja dyspozycja</strong>.
-                </p>
-              </div>
-            ) : (
-              <div className="official-schedule-list">
-                <table className="instructor-rides-table">
-                  <thead>
-                    <tr>
-                      <th>Data</th>
-                      <th>Dzień tygodnia</th>
-                      <th>Godziny pracy</th>
-                      <th>Status grafiku</th>
-                      <th>Uwagi administratora</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {officialSchedules.map((entry) => {
-                      const d = new Date(entry.data + 'T12:00:00');
-                      const dayName = d.toLocaleDateString('pl-PL', { weekday: 'long' });
-                      const dateStr = d.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' });
-
+              {isLoadingSchedule ? (
+                <div className="instructor-loading">Pobieranie grafiku pracy...</div>
+              ) : (
+                <div className="disp-calendar-grid">
+                  <div className="disp-weekdays-row">
+                    {WEEKDAY_NAMES.map((d) => <div key={d} className="disp-weekday-cell">{d}</div>)}
+                  </div>
+                  <div className="disp-days-grid">
+                    {calendarDays.map((cell, idx) => {
+                      if (!cell.dayNumber || !cell.dateKey) {
+                        return <div key={`empty-${idx}`} className="disp-day-cell empty" />;
+                      }
+                      const entry = schedulesForMonth.find((item) => item.data === cell.dateKey);
+                      const dayRides = ridesForMonth.filter((ride) =>
+                        parseRideTimestamp(ride.data).dateStr === cell.dateKey,
+                      );
                       return (
-                        <tr key={entry.id || entry.data}>
-                          <td><strong>{dateStr}</strong></td>
-                          <td style={{ textTransform: 'capitalize' }}>{dayName}</td>
-                          <td>
-                            <span className="shift-time-chip">
-                              {entry.godzina_od.slice(0, 5)} – {entry.godzina_do.slice(0, 5)}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="status-chip status-done">Zatwierdzony</span>
-                          </td>
-                          <td>{entry.uwagi || '—'}</td>
-                        </tr>
+                        <div
+                          key={cell.dateKey}
+                          className={`disp-day-cell${entry ? ' selected' : ''}${dayRides.length > 0 ? ' instructor-ride-day' : ''}${selectedScheduleDayKey === cell.dateKey ? ' active-focus' : ''}`}
+                          title={entry ? `${entry.godzina_od.slice(0, 5)}–${entry.godzina_do.slice(0, 5)} · Zatwierdzony grafik` : 'Brak zatwierdzonego grafiku'}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedScheduleDayKey(cell.dateKey)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedScheduleDayKey(cell.dateKey);
+                            }
+                          }}
+                        >
+                          <div className="disp-day-header">
+                            <span className="disp-day-num">{cell.dayNumber}</span>
+                            {dayRides.length > 0 && <span className="disp-check-icon">{dayRides.length}</span>}
+                          </div>
+                          {entry
+                            ? <div className="disp-day-badge">{entry.godzina_od.slice(0, 5)}–{entry.godzina_do.slice(0, 5)}</div>
+                            : <div className="disp-day-off">—</div>}
+                          {dayRides.length > 0 && (
+                            <div className="instructor-ride-events">
+                              {dayRides.slice(0, 2).map((ride) => {
+                                const parsed = parseRideTimestamp(ride.data);
+                                const studentName = ride.kursant
+                                  ? `${ride.kursant.imie} ${ride.kursant.nazwisko}`
+                                  : ride.id_kursanta
+                                    ? `Kursant #${ride.id_kursanta}`
+                                    : 'Kursant';
+                                return (
+                                  <div className="instructor-ride-event" key={ride.id}>
+                                    <strong>{formatRideTimeRange(parsed.timeStr)}</strong>
+                                    <span>{studentName}</span>
+                                  </div>
+                                );
+                              })}
+                              {dayRides.length > 2 && (
+                                <div className="instructor-ride-more">+{dayRides.length - 2} więcej</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ─── ZAKŁADKA 3: REZERWACJE I JAZDY KURSANTÓW ────────────────── */}
-        {activeTab === 'kalendarz' && (
-          <div className="card instructor-card">
-            <div className="card-header rides-header-flex">
-              <div className="card-title-group">
-                <span className="card-icon blue">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                </span>
-                <div>
-                  <h2 className="card-title">Zarezerwowane jazdy kursantów</h2>
-                  <p className="card-subtitle">
-                    Jazdy umówione przez kursantów z Twojego oficjalnego grafiku.
-                  </p>
+                  </div>
                 </div>
-              </div>
-
-              <div className="rides-filter-pills">
-                <button
-                  type="button"
-                  className={`filter-pill${ridesFilter === 'upcoming' ? ' active' : ''}`}
-                  onClick={() => setRidesFilter('upcoming')}
-                >
-                  Nadchodzące ({upcomingCount})
-                </button>
-                <button
-                  type="button"
-                  className={`filter-pill${ridesFilter === 'past' ? ' active' : ''}`}
-                  onClick={() => setRidesFilter('past')}
-                >
-                  Poprzednie ({pastCount})
-                </button>
-                <button
-                  type="button"
-                  className={`filter-pill${ridesFilter === 'all' ? ' active' : ''}`}
-                  onClick={() => setRidesFilter('all')}
-                >
-                  Wszystkie ({rides.length})
-                </button>
-              </div>
+              )}
             </div>
 
-            {isLoadingRides ? (
-              <div className="instructor-loading">Wczytywanie listy jazd...</div>
-            ) : filteredRides.length === 0 ? (
-              <div className="instructor-empty-state">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="48" height="48" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                <p className="empty-title">Brak jazd w wybranej kategorii</p>
-                <p className="empty-desc">
-                  {ridesFilter === 'upcoming'
-                    ? 'Nie masz obecnie zaplanowanych nadchodzących jazd z kursantami.'
-                    : 'Brak zrealizowanych jazd w historii.'}
-                </p>
-              </div>
-            ) : (
-              <div className="instructor-rides-table-wrap">
-                <table className="instructor-rides-table">
-                  <thead>
-                    <tr>
-                      <th>Data i godzina</th>
-                      <th>Kursant</th>
-                      <th>Kontakt</th>
-                      <th>Rodzaj jazdy</th>
-                      <th>Uwagi kursanta</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRides.map((ride) => {
-                      const rDate = new Date(ride.data);
-                      const isUpcoming = rDate >= now;
-                      const dateFormatted = rDate.toLocaleDateString('pl-PL', {
-                        weekday: 'short',
-                        year: 'numeric',
-                        month: 'short',
+            <aside className="card instructor-card instructor-schedule-details">
+              {selectedScheduleDayKey ? (
+                (() => {
+                  const selectedDate = new Date(`${selectedScheduleDayKey}T12:00:00`);
+                  const entry = schedulesForMonth.find((item) => item.data === selectedScheduleDayKey);
+                  const dayRides = ridesForMonth.filter((ride) =>
+                    parseRideTimestamp(ride.data).dateStr === selectedScheduleDayKey,
+                  );
+                  return (
+                    <>
+                      <span className="owner-day-eyebrow">WYBRANY DZIEŃ</span>
+                      <h3>{selectedDate.toLocaleDateString('pl-PL', {
+                        weekday: 'long',
                         day: 'numeric',
-                      });
-                      const parsed = parseRideTimestamp(ride.data);
-                      const timeRange = formatRideTimeRange(parsed.timeStr);
-
-                      const studentName = ride.kursant
-                        ? `${ride.kursant.imie} ${ride.kursant.nazwisko}`
-                        : ride.id_kursanta
-                        ? `Kursant #${ride.id_kursanta}`
-                        : 'Kursant';
-
-                      const studentPhone = ride.kursant?.telefon || '—';
-
-                      return (
-                        <tr key={ride.id} className={isUpcoming ? 'row-upcoming' : 'row-past'}>
-                          <td>
-                            <div className="ride-date-cell">
-                              <span className="ride-day">{dateFormatted}</span>
-                              <span className="ride-time-chip">{timeRange}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="ride-student-name">
-                              <strong>{studentName}</strong>
-                            </div>
-                          </td>
-                          <td>
-                            <span className="ride-phone">{studentPhone}</span>
-                          </td>
-                          <td>
-                            <span className="ride-type-tag">
-                              {ride.typ_jazdy || 'Jazda szkoleniowa'}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="ride-notes-text">
-                              {ride.uwagi || 'Brak uwag'}
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`status-chip ${isUpcoming ? 'status-upcoming' : 'status-done'}`}>
-                              {isUpcoming ? 'Nadchodząca' : 'Zakończona'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                        month: 'long',
+                        year: 'numeric',
+                      })}</h3>
+                      <div className="instructor-detail-section">
+                        <span>Godziny pracy</span>
+                        {entry
+                          ? <strong className="instructor-work-hours">{entry.godzina_od.slice(0, 5)}–{entry.godzina_do.slice(0, 5)}</strong>
+                          : <p>Brak zatwierdzonych godzin pracy.</p>}
+                      </div>
+                      <div className="instructor-detail-section">
+                        <div className="instructor-detail-heading">
+                          <span>Jazdy kursantów</span>
+                          <b>{dayRides.length}</b>
+                        </div>
+                        {dayRides.length === 0 ? (
+                          <p>Brak zarezerwowanych jazd tego dnia.</p>
+                        ) : (
+                          <div className="instructor-detail-rides">
+                            {dayRides.map((ride) => {
+                              const parsed = parseRideTimestamp(ride.data);
+                              const studentName = ride.kursant
+                                ? `${ride.kursant.imie} ${ride.kursant.nazwisko}`
+                                : ride.id_kursanta
+                                  ? `Kursant #${ride.id_kursanta}`
+                                  : 'Kursant';
+                              return (
+                                <div className="instructor-detail-ride" key={ride.id}>
+                                  <strong>{formatRideTimeRange(parsed.timeStr)}</strong>
+                                  <span>{studentName}</span>
+                                  {ride.kursant?.telefon && <small>{ride.kursant.telefon}</small>}
+                                  {ride.uwagi && <small>Uwagi: {ride.uwagi}</small>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()
+              ) : (
+                <div className="instructor-schedule-empty">
+                  <span className="instructor-schedule-empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+                  </span>
+                  <strong>Wybierz dzień</strong>
+                  <span>Kliknij dzień w kalendarzu, aby zobaczyć szczegóły grafiku i jazd.</span>
+                </div>
+              )}
+            </aside>
           </div>
         )}
-        <footer className="owner-footer"><span>DrivePro</span><i />Panel instruktora</footer>
+
+        <footer className="owner-footer">
+          <span>DrivePro</span>
+          <i />
+          <span>Panel instruktora</span>
+          <span className="owner-footer-date">{today.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+        </footer>
       </main>
     </div>
   );

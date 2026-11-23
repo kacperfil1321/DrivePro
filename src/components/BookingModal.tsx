@@ -7,7 +7,6 @@ import {
   calculateAvailableSlots,
   countSlotsForDay,
   fetchOfficialSchedule,
-  getMaxBookingDate,
 } from '../lib/bookingService';
 
 interface Props {
@@ -15,6 +14,7 @@ interface Props {
   onClose: () => void;
   instructors: Instructor[];
   bookedRides: RideReservation[];
+  studentId: number;
   onConfirm: (booking: {
     instructorId: number;
     instructorName: string;
@@ -74,6 +74,7 @@ export const BookingModal: React.FC<Props> = ({
   onClose,
   instructors,
   bookedRides,
+  studentId,
   onConfirm,
 }) => {
   const today = useMemo(() => new Date(), []);
@@ -82,11 +83,7 @@ export const BookingModal: React.FC<Props> = ({
     d.setDate(d.getDate() + 1);
     return toDateStr(d);
   }, []);
-  const maxDate = useMemo(() => {
-    return getMaxBookingDate();
-  }, []);
   const todayStr = toDateStr(today);
-  const maxDateStr = toDateStr(maxDate);
 
   const [selectedInstructorId, setSelectedInstructorId] = useState<number>(
     instructors[0]?.id || 0
@@ -122,7 +119,7 @@ export const BookingModal: React.FC<Props> = ({
     if (!selectedInstructorId) return;
     let mounted = true;
     setIsLoadingSchedule(true);
-    fetchOfficialSchedule(selectedInstructorId, todayStr, maxDateStr)
+    fetchOfficialSchedule(selectedInstructorId, todayStr)
       .then((off) => {
         if (mounted) {
           setOfficialSchedules(off);
@@ -131,7 +128,7 @@ export const BookingModal: React.FC<Props> = ({
       .catch((err) => console.error('Błąd grafiku:', err))
       .finally(() => { if (mounted) setIsLoadingSchedule(false); });
     return () => { mounted = false; };
-  }, [selectedInstructorId, todayStr, maxDateStr]);
+  }, [selectedInstructorId, todayStr]);
 
   /* Slots for selected day */
   const slots = useMemo(() => {
@@ -157,12 +154,22 @@ export const BookingModal: React.FC<Props> = ({
     [visibleSlots]
   );
 
+  const hasRideInSelectedDate = useMemo(
+    () =>
+      bookedRides.some((ride) => {
+        if (ride.id_kursanta !== studentId) return false;
+        const rideDate = String(ride.data).trim().replace(' ', 'T').slice(0, 10);
+        return rideDate === selectedDate;
+      }),
+    [bookedRides, selectedDate, studentId]
+  );
+
   /* Auto-select first free slot when date/instructor changes */
   useEffect(() => {
     const firstFree = visibleSlots.find((s) => s.isAvailable);
-    setSelectedTime(firstFree ? firstFree.time : '');
+    setSelectedTime(hasRideInSelectedDate ? '' : firstFree ? firstFree.time : '');
     setErrorMessage(null);
-  }, [visibleSlots]);
+  }, [visibleSlots, hasRideInSelectedDate]);
 
   /* Calendar days */
   const calDays = useMemo(() => buildCalendarDays(calYear, calMonth), [calYear, calMonth]);
@@ -174,11 +181,7 @@ export const BookingModal: React.FC<Props> = ({
     return prevMonth >= thisMonth;
   }, [calYear, calMonth, today]);
 
-  const canGoForward = useMemo(() => {
-    const nextMonth = new Date(calYear, calMonth + 1, 1);
-    const maxMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
-    return nextMonth <= maxMonth;
-  }, [calYear, calMonth, maxDate]);
+  const canGoForward = useMemo(() => true, []);
 
   const handlePrevMonth = () => {
     if (!canGoBack) return;
@@ -203,6 +206,15 @@ export const BookingModal: React.FC<Props> = ({
   const handleSubmit = async () => {
     if (!selectedDate || !selectedTime || !selectedInstructorId) {
       setErrorMessage('Wybierz instruktora, datę i wolną godzinę.');
+      return;
+    }
+    const hasRideThisDay = bookedRides.some((ride) => {
+      if (ride.id_kursanta !== studentId) return false;
+      const rideDate = String(ride.data).trim().replace(' ', 'T').slice(0, 10);
+      return rideDate === selectedDate;
+    });
+    if (hasRideThisDay) {
+      setErrorMessage('Możesz zarezerwować tylko jedną jazdę w tym samym dniu.');
       return;
     }
     setIsSubmitting(true);
@@ -299,9 +311,6 @@ export const BookingModal: React.FC<Props> = ({
             <div className="booking-field-group">
               <label className="field-label">
                 Data jazdy
-                <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--blue-600)', fontSize: 11 }}>
-                  maks. 2 tygodnie w przód
-                </span>
               </label>
 
               {isLoadingSchedule ? (
@@ -348,12 +357,25 @@ export const BookingModal: React.FC<Props> = ({
                       const isToday = dStr === todayStr;
                       const isSelected = dStr === selectedDate;
                       const isPast = dStr <= todayStr;
-                      const isTooFar = dStr > maxDateStr;
-                      const isDisabled = isPast || isTooFar || !isCurrentMonth;
+                      const hasRideThisDay = bookedRides.some((ride) => {
+                        if (ride.id_kursanta !== studentId) return false;
+                        const rideDate = String(ride.data).trim().replace(' ', 'T').slice(0, 10);
+                        return rideDate === dStr;
+                      });
+                      const isDisabled = isPast || !isCurrentMonth;
 
                       // Dots: only compute for valid, current-month days
                       let dotEl: React.ReactNode = null;
-                      if (isCurrentMonth && !isPast && !isTooFar) {
+                      if (hasRideThisDay) {
+                        dotEl = (
+                          <div className="cal-day-dots" aria-label="Masz już jazdę tego dnia">
+                            <span
+                              className="cal-dot"
+                              style={{ background: '#f97316' }}
+                            />
+                          </div>
+                        );
+                      } else if (isCurrentMonth && !isPast) {
                         const { total, free } = getDotInfo(dStr);
                         if (total > 0) {
                           // Show up to 3 dots; colour by free ratio
@@ -382,6 +404,7 @@ export const BookingModal: React.FC<Props> = ({
                             isSelected ? 'cal-day-selected' : '',
                             isToday ? 'cal-day-today' : '',
                             isDisabled ? 'cal-day-disabled' : '',
+                            hasRideThisDay ? 'cal-day-booked' : '',
                             !isCurrentMonth ? 'cal-day-other-month' : '',
                           ].filter(Boolean).join(' ')}
                           disabled={isDisabled}
@@ -392,7 +415,7 @@ export const BookingModal: React.FC<Props> = ({
                               setCalMonth(day.getMonth());
                             }
                           }}
-                          title={dStr}
+                          title={hasRideThisDay ? `${dStr} - masz już jazdę tego dnia` : dStr}
                         >
                           <span className="cal-day-num">{day.getDate()}</span>
                           {dotEl}
@@ -439,7 +462,25 @@ export const BookingModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {visibleSlots.length === 0 && !isLoadingSchedule ? (
+              {hasRideInSelectedDate && (
+                <div
+                  role="status"
+                  style={{
+                    marginBottom: 12,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    background: 'var(--amber-50, #fffbeb)',
+                    border: '1px solid var(--amber-200, #fde68a)',
+                    color: 'var(--amber-800, #92400e)',
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Masz już jazdę zaplanowaną tego dnia. Możesz zarezerwować tylko jedną jazdę dziennie.
+                </div>
+              )}
+
+              {hasRideInSelectedDate ? null : visibleSlots.length === 0 && !isLoadingSchedule ? (
                 <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>
                   {selectedDate
                     ? 'Instruktor nie pracuje w tym dniu.'

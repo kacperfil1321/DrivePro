@@ -6,3 +6,5 @@ const supabasePublishableKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = supabaseUrl && supabasePublishableKey
   ? createClient(supabaseUrl, supabasePublishableKey)
   : null;
+
+export { supabaseUrl, supabasePublishableKey };
